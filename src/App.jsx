@@ -3,6 +3,8 @@ import ExportButtons from "./components/ExportButtons";
 import RotaTable from "./components/RotaTable";
 import SwapModeControls from "./components/SwapModeControls";
 import ShiftCounter from "./components/ShiftCounter";
+import PeopleSwapControls from "./components/PeopleSwapControls";
+
 import "./App.css";
 
 function addDays(date, days) {
@@ -131,6 +133,10 @@ function swapAssignments(rows, a, b) {
 }
 
 export default function App() {
+  const [peopleSwapMode, setPeopleSwapMode] = useState(false);
+const [selectedPeople, setSelectedPeople] = useState([]); // ["dean", "stan"]
+const [peopleSwapError, setPeopleSwapError] = useState("");
+
   const [names, setNames] = useState(() => {
     const preset = ["luke", "dean", "jason", "chris", "dom", "andy", "mick", "paul", "ralph", "stan"];
     return [...preset, ...Array.from({ length: 15 - preset.length }, () => "")];
@@ -150,6 +156,42 @@ export default function App() {
     const picked = new Date(startDateISO + "T00:00:00");
     return getNextOrSameFriday(picked);
   }, [startDateISO]);
+  function togglePerson(name) {
+  setPeopleSwapError("");
+  setSelectedPeople((prev) => {
+    if (prev.includes(name)) return prev.filter((n) => n !== name);
+    if (prev.length < 2) return [...prev, name];
+    return [prev[1], name]; // replace oldest if already 2
+  });
+}
+
+const canSwapPeople = selectedPeople.length === 2 && selectedPeople[0] !== selectedPeople[1];
+
+function swapPeopleInRota(a, b) {
+  return (rotaRows || []).map((r) => {
+    const weekend = r.weekend === a ? b : r.weekend === b ? a : r.weekend;
+    const week = r.week === a ? b : r.week === b ? a : r.week;
+    return { ...r, weekend, week };
+  });
+}
+
+function doSwapPeople() {
+  if (!canSwapPeople) return;
+  const [a, b] = selectedPeople;
+
+  if (!a || !b || a === b) {
+    setPeopleSwapError("Pick two different people to swap.");
+    return;
+  }
+
+  const swapped = swapPeopleInRota(a, b);
+  setRotaRows(swapped);
+
+  setPeopleSwapError("");
+  setSelectedPeople([]);
+  setPeopleSwapMode(false);
+}
+
 
   function updateName(i, value) {
     setNames((prev) => {
@@ -168,6 +210,10 @@ export default function App() {
   }
 
   function generateLinear() {
+    setPeopleSwapMode(false);
+setSelectedPeople([]);
+setPeopleSwapError("");
+
     const result = generateRotaLinearBalanced({
       names,
       startFriday,
@@ -181,6 +227,10 @@ export default function App() {
   }
 
   function clearRota() {
+    setPeopleSwapMode(false);
+setSelectedPeople([]);
+setPeopleSwapError("");
+
     setError("");
     setRotaRows([]);
     setSwapMode(false);
@@ -378,6 +428,37 @@ export default function App() {
         <div style={{ marginTop: 10 }}>
           <RotaTable rows={rotaRows} swapMode={swapMode} selected={swapSelection} onCellClick={handleCellClick} />
         </div>
+<div style={{ marginTop: 12 }}>
+  <PeopleSwapControls
+    enabled={peopleSwapMode}
+    selectedCount={selectedPeople.length}
+    disabled={!rotaRows || rotaRows.length === 0}
+    canSwap={canSwapPeople}
+    onToggle={() => {
+      setPeopleSwapMode((v) => !v);
+      setSelectedPeople([]);
+      setPeopleSwapError("");
+    }}
+    onClear={() => {
+      setSelectedPeople([]);
+      setPeopleSwapError("");
+    }}
+    onSwap={doSwapPeople}
+  />
+
+  {peopleSwapError ? (
+    <div style={{ marginTop: 8, background: "#fff3cd", border: "1px solid #ffeeba", padding: 10, borderRadius: 6 }}>
+      {peopleSwapError}
+    </div>
+  ) : null}
+</div>
+
+<ShiftCounter
+  rows={rotaRows}
+  peopleSwapMode={peopleSwapMode}
+  selectedPeople={selectedPeople}
+  onPersonClick={togglePerson}
+/>
 
         <ShiftCounter rows={rotaRows} />
       </div>
