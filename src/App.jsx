@@ -356,7 +356,8 @@ export default function App() {
             </div>
           </div>
 
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, color: "black" }}>
+        <table className="names-table" style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, color: "black" }}>
+
             <thead>
               <tr>
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8, width: 40 }}>#</th>
@@ -389,7 +390,7 @@ export default function App() {
       <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
         <h3 style={{ marginTop: 0 }}>Rota</h3>
 
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, color: "black" }}>
+        <table className="rota-table">
           <thead>
             <tr>
               <th style={{ width:"30%"}}>

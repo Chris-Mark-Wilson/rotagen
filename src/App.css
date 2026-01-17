@@ -5,33 +5,44 @@
   text-align: center;
 }
 
-/* Rota table row colours */
-table tbody tr:nth-child(odd) {
-  background-color: #e8f5e9; /* soft green */
-  color:black;
-  border-bottom:"grey solid 1px";
+/* ---------- TABLE BASE ---------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  color: black;
 }
 
-table tbody tr:nth-child(even) {
-  background-color: #fce4ec; /* soft pink */
-  color:black;
-    border-bottom:"1px solid black";
-}
-
-/* Optional: nicer hover effect */
-table tbody tr:hover {
-  background-color: #fff9c4;
-    /* pale yellow */
-}
-th{
-    background-color:#a2d5ab;
-    color:black;
-}
-td{
-  padding:8px;
+th,
+td {
+  padding: 8px;
   border-bottom: 1px solid rgb(38, 38, 38);
+  text-align: left;
+}
+table.names-table tbody tr {
+  background: white !important;
+}
+table.names-table tbody tr:hover {
+  background: white !important;
 }
 
 
+/* ---------- HEADER ---------- */
+th {
+  background-color: #a2d5ab;
+  color: black;
+}
+/* rota table colours */
+table.rota-table tbody tr:nth-child(odd) {
+  background-color: #e8f5e9;
+}
 
+table.rota-table tbody tr:nth-child(even) {
+  background-color: #fce4ec;
+}
+
+/* ---------- HOVER ---------- */
+table tbody tr:hover {
+  background-color: #fff9c4; /* pale yellow */
+  transition: background-color 0.15s ease-in-out;
+}
 
