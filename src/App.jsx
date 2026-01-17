@@ -1,4 +1,7 @@
 import React, { useMemo, useState } from "react";
+import ExportButtons from "./components/ExportButtons";
+import RotaTable from "./components/RotaTable";
+
 import "./App.css";
 
 function addDays(date, days) {
@@ -387,38 +390,16 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Rota</h3>
+    <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+  <h3 style={{ marginTop: 0 }}>Rota</h3>
 
-        <table className="rota-table">
-          <thead>
-            <tr>
-              <th style={{ width:"30%"}}>
-                Week commencing (Friday)
-              </th>
-              <th >Weekend</th>
-              <th >Week</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rotaRows.length === 0 ? (
-              <tr>
-                <td colSpan={3} style={{ padding: 12, opacity: 0.7 }}>
-                  No rota generated yet. Click <b>Randomise rota</b>.
-                </td>
-              </tr>
-            ) : (
-              rotaRows.map((r, idx) => (
-                <tr key={idx}>
-                  <td >{formatUK(r.weekCommencing)}</td>
-                  <td >{r.weekend}</td>
-                  <td >{r.week}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+  <ExportButtons rows={rotaRows} startDateISO={startDateISO} weeks={weeks} />
+
+  <div style={{ marginTop: 10 }}>
+    <RotaTable rows={rotaRows} />
+  </div>
+</div>
+
     </div>
   );
 }
