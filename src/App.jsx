@@ -460,7 +460,6 @@ setPeopleSwapError("");
   onPersonClick={togglePerson}
 />
 
-        <ShiftCounter rows={rotaRows} />
       </div>
     </div>
   );
