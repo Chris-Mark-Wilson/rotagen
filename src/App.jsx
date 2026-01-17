@@ -429,22 +429,27 @@ setPeopleSwapError("");
           <RotaTable rows={rotaRows} swapMode={swapMode} selected={swapSelection} onCellClick={handleCellClick} />
         </div>
 <div style={{ marginTop: 12 }}>
-  <PeopleSwapControls
-    enabled={peopleSwapMode}
-    selectedCount={selectedPeople.length}
-    disabled={!rotaRows || rotaRows.length === 0}
-    canSwap={canSwapPeople}
-    onToggle={() => {
-      setPeopleSwapMode((v) => !v);
-      setSelectedPeople([]);
-      setPeopleSwapError("");
-    }}
-    onClear={() => {
-      setSelectedPeople([]);
-      setPeopleSwapError("");
-    }}
-    onSwap={doSwapPeople}
-  />
+ <PeopleSwapControls
+  enabled={peopleSwapMode}
+  selectedPeople={selectedPeople}
+  disabled={!rotaRows || rotaRows.length === 0}
+  canSwap={canSwapPeople}
+  onToggle={() => {
+    setPeopleSwapMode((v) => !v);
+    setSelectedPeople([]);
+    setPeopleSwapError("");
+  }}
+  onClear={() => {
+    setSelectedPeople([]);
+    setPeopleSwapError("");
+  }}
+  onSwap={doSwapPeople}
+  onRemovePerson={(name) => {
+    setSelectedPeople((prev) => prev.filter((n) => n !== name));
+    setPeopleSwapError("");
+  }}
+/>
+
 
   {peopleSwapError ? (
     <div style={{ marginTop: 8, background: "#fff3cd", border: "1px solid #ffeeba", padding: 10, borderRadius: 6 }}>
