@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import "./App.css";
 
 function addDays(date, days) {
   const d = new Date(date);
@@ -355,7 +356,7 @@ export default function App() {
             </div>
           </div>
 
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, color: "black" }}>
             <thead>
               <tr>
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8, width: 40 }}>#</th>
@@ -388,14 +389,14 @@ export default function App() {
       <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
         <h3 style={{ marginTop: 0 }}>Rota</h3>
 
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, color: "black" }}>
           <thead>
             <tr>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
+              <th style={{ width:"30%"}}>
                 Week commencing (Friday)
               </th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Weekend</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Week</th>
+              <th >Weekend</th>
+              <th >Week</th>
             </tr>
           </thead>
           <tbody>
@@ -408,9 +409,9 @@ export default function App() {
             ) : (
               rotaRows.map((r, idx) => (
                 <tr key={idx}>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{formatUK(r.weekCommencing)}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{r.weekend}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{r.week}</td>
+                  <td >{formatUK(r.weekCommencing)}</td>
+                  <td >{r.weekend}</td>
+                  <td >{r.week}</td>
                 </tr>
               ))
             )}
