@@ -45,4 +45,17 @@ table tbody tr:hover {
   background-color: #fff9c4; /* pale yellow */
   transition: background-color 0.15s ease-in-out;
 }
+/* Reusable striped table (rota + shift counter) */
+.striped-table tbody tr:nth-child(odd) {
+  background-color: #e8f5e9; /* soft green */
+}
+
+.striped-table tbody tr:nth-child(even) {
+  background-color: #fce4ec; /* soft pink */
+}
+
+.striped-table tbody tr:hover {
+  background-color: #fff9c4;
+}
+
 

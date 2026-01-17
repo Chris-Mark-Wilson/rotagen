@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
 import ExportButtons from "./components/ExportButtons";
 import RotaTable from "./components/RotaTable";
-
+import SwapModeControls from "./components/SwapModeControls";
+import ShiftCounter from "./components/ShiftCounter";
 import "./App.css";
 
 function addDays(date, days) {
@@ -25,81 +26,16 @@ function formatUK(date) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-// Distribute total slots across names as evenly as possible (some get +1)
-function buildQuotas(names, totalSlots) {
-  const n = names.length;
-  const base = Math.floor(totalSlots / n);
-  const rem = totalSlots % n;
-  const order = shuffle(names);
-  const quota = new Map();
-  order.forEach((name, idx) => quota.set(name, base + (idx < rem ? 1 : 0)));
-  return quota;
-}
-
-// Creates "ideal gap" and staggered "next due" values for steady spacing
-function buildCadence(names, quotaMap, weeks) {
-  const gap = new Map();     // name -> ideal gap in weeks for this duty type
-  const nextDue = new Map(); // name -> target week index for next assignment
-
-  names.forEach((name) => {
-    const q = quotaMap.get(name) || 0;
-    if (q <= 0) {
-      gap.set(name, Infinity);
-      nextDue.set(name, Infinity);
-      return;
-    }
-    const g = weeks / q; // ideal spacing
-    gap.set(name, g);
-    // Random stagger so not everyone starts at week 0
-    nextDue.set(name, Math.random() * g);
-  });
-
-  return { gap, nextDue };
-}
-
-// Pick the most "overdue" candidate for the duty, favouring steady gaps.
-function pickMostOverdue({ names, remainingQuota, nextDue, excludeSet, weekIndex }) {
-  let best = null;
-  let bestScore = -Infinity;
-
-  for (const name of names) {
-    if (excludeSet.has(name)) continue;
-
-    const q = remainingQuota.get(name) || 0;
-    if (q <= 0) continue;
-
-    const due = nextDue.get(name);
-    // overdue = how far past their due date we are
-    const overdue = weekIndex - due;
-
-    // big weight on overdue; small random tie-break
-    const score = overdue * 1000 + Math.random();
-    if (score > bestScore) {
-      bestScore = score;
-      best = name;
-    }
-  }
-
-  return best;
-}
-
 /**
- * Steady-gap rota generator:
- * - Weekend and Week duties each have their own quotas + cadence
- * - No duplicates within the same week
- * - If someone does Weekend in week W, they cannot do ANY duty in week W+1
- * - Attempts multiple random staggers and keeps the best (fewest failures, best gap feel)
+ * Deterministic "linear" generator with duty-type balancing:
+ * - Prefer people with fewer of the current duty type
+ * - Prefer people whose Weekend and Week counts are closest (balance)
+ * - Still iterates from a moving pointer so it feels sequential
+ * - Constraints at generation time:
+ *   - No duplicates in the same week
+ *   - If someone does Weekend in week W, they cannot do ANY duty in week W+1
  */
-function generateRota({ names, startFriday, weeks, attempts = 200 }) {
+function generateRotaLinearBalanced({ names, startFriday, weeks }) {
   const cleanNames = names.map((n) => n.trim()).filter(Boolean);
 
   if (cleanNames.length < 3) {
@@ -109,126 +45,89 @@ function generateRota({ names, startFriday, weeks, attempts = 200 }) {
     return { rows: [], error: "Number of weeks must be at least 1." };
   }
 
-  const nameOrderBase = cleanNames; // we shuffle per attempt anyway
+  const weekendCount = new Map(cleanNames.map((n) => [n, 0]));
+  const weekCount = new Map(cleanNames.map((n) => [n, 0]));
 
-  let bestRows = null;
-  let bestPenalty = Infinity;
-  let bestError = null;
+  let pWeekend = 0;
+  let pWeek = 0;
 
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const namesOrder = shuffle(nameOrderBase);
+  function pickCandidate(type, excludeSet) {
+    const pointer = type === "weekend" ? pWeekend : pWeek;
 
-    // Quotas: everyone gets a fair share for each duty type
-    const weekendQuota = buildQuotas(namesOrder, weeks); // total weekend slots = weeks
-    const weekQuota = buildQuotas(namesOrder, weeks);    // total week slots = weeks
+    let bestName = null;
+    let bestIdx = -1;
+    let bestScore = null;
 
-    // Cadence / spacing
-    const weekendCad = buildCadence(namesOrder, weekendQuota, weeks);
-    const weekCad = buildCadence(namesOrder, weekQuota, weeks);
+    for (let k = 0; k < cleanNames.length; k++) {
+      const idx = (pointer + k) % cleanNames.length;
+      const name = cleanNames[idx];
+      if (excludeSet.has(name)) continue;
 
-    const rows = [];
-    let prevWeekend = null;
-    let failed = false;
+      const wEnd = weekendCount.get(name) || 0;
+      const wDay = weekCount.get(name) || 0;
 
-    for (let w = 0; w < weeks; w++) {
-      const exclude = new Set();
-      if (prevWeekend) exclude.add(prevWeekend); // cooldown: prev weekend person off this whole week
+      const dutyCount = type === "weekend" ? wEnd : wDay;
+      const balance = type === "weekend" ? wEnd - wDay : wDay - wEnd;
 
-      // Pick weekend (steady spacing)
-      const weekend = pickMostOverdue({
-        names: namesOrder,
-        remainingQuota: weekendQuota,
-        nextDue: weekendCad.nextDue,
-        excludeSet: exclude,
-        weekIndex: w,
-      });
+      const score = [dutyCount, balance, k]; // lower is better
 
-      if (!weekend) {
-        failed = true;
-        break;
+      const better =
+        !bestScore ||
+        score[0] < bestScore[0] ||
+        (score[0] === bestScore[0] && score[1] < bestScore[1]) ||
+        (score[0] === bestScore[0] && score[1] === bestScore[1] && score[2] < bestScore[2]);
+
+      if (better) {
+        bestName = name;
+        bestIdx = idx;
+        bestScore = score;
       }
-
-      // Commit weekend
-      weekendQuota.set(weekend, (weekendQuota.get(weekend) || 0) - 1);
-      weekendCad.nextDue.set(weekend, w + weekendCad.gap.get(weekend)); // schedule next due
-
-      // Same-week constraint
-      exclude.add(weekend);
-
-      // Pick week duty (steady spacing)
-      const weekDuty = pickMostOverdue({
-        names: namesOrder,
-        remainingQuota: weekQuota,
-        nextDue: weekCad.nextDue,
-        excludeSet: exclude,
-        weekIndex: w,
-      });
-
-      if (!weekDuty) {
-        failed = true;
-        break;
-      }
-
-      // Commit week duty
-      weekQuota.set(weekDuty, (weekQuota.get(weekDuty) || 0) - 1);
-      weekCad.nextDue.set(weekDuty, w + weekCad.gap.get(weekDuty));
-
-      rows.push({
-        weekCommencing: addDays(startFriday, w * 7),
-        weekend,
-        week: weekDuty,
-      });
-
-      prevWeekend = weekend;
     }
 
-    if (failed) {
-      // Penalise failures heavily, but keep searching attempts
-      const penalty = 1e9 + rows.length;
-      if (penalty < bestPenalty) {
-        bestPenalty = penalty;
-        bestRows = rows;
-        bestError = "Generator got stuck with the current rules. Try adding more names.";
-      }
-      continue;
-    }
+    if (!bestName) return null;
 
-    // Score the schedule by how “steady” the gaps are (lower = better)
-    // We measure variance of gaps per person per duty type.
-    function gapVariance(dutyKey) {
-      const byPerson = new Map();
-      for (let i = 0; i < rows.length; i++) {
-        const name = rows[i][dutyKey];
-        if (!byPerson.has(name)) byPerson.set(name, []);
-        byPerson.get(name).push(i);
-      }
+    if (type === "weekend") pWeekend = (bestIdx + 1) % cleanNames.length;
+    else pWeek = (bestIdx + 1) % cleanNames.length;
 
-      let varSum = 0;
-      for (const [, idxs] of byPerson) {
-        if (idxs.length <= 2) continue;
-        const gaps = [];
-        for (let i = 1; i < idxs.length; i++) gaps.push(idxs[i] - idxs[i - 1]);
-        const mean = gaps.reduce((a, c) => a + c, 0) / gaps.length;
-        const variance = gaps.reduce((a, c) => a + (c - mean) ** 2, 0) / gaps.length;
-        varSum += variance;
-      }
-      return varSum;
-    }
-
-    const penalty = gapVariance("weekend") + gapVariance("week");
-
-    if (penalty < bestPenalty) {
-      bestPenalty = penalty;
-      bestRows = rows;
-      bestError = null;
-    }
+    return bestName;
   }
 
-  if (!bestRows || bestRows.length === 0) {
-    return { rows: [], error: bestError || "Could not generate a rota with the given rules." };
+  const rows = [];
+  let prevWeekend = null;
+
+  for (let w = 0; w < weeks; w++) {
+    const exclude = new Set();
+    if (prevWeekend) exclude.add(prevWeekend); // cooldown: prev weekend person cannot do anything this week
+
+    const weekend = pickCandidate("weekend", exclude);
+    if (!weekend) return { rows: [], error: "Could not allocate Weekend duty with current names/rules." };
+
+    exclude.add(weekend); // no duplicates same week
+
+    const weekDuty = pickCandidate("week", exclude);
+    if (!weekDuty) return { rows: [], error: "Could not allocate Week duty with current names/rules." };
+
+    weekendCount.set(weekend, (weekendCount.get(weekend) || 0) + 1);
+    weekCount.set(weekDuty, (weekCount.get(weekDuty) || 0) + 1);
+
+    rows.push({
+      weekCommencing: addDays(startFriday, w * 7),
+      weekend,
+      week: weekDuty,
+    });
+
+    prevWeekend = weekend;
   }
 
-  return { rows: bestRows, error: bestError };
+  return { rows, error: null };
+}
+
+function swapAssignments(rows, a, b) {
+  const copy = rows.map((r) => ({ ...r }));
+  const tmp = copy[a.weekIndex][a.slot];
+  copy[a.weekIndex][a.slot] = copy[b.weekIndex][b.slot];
+  copy[b.weekIndex][b.slot] = tmp;
+  return copy;
 }
 
 export default function App() {
@@ -242,6 +141,10 @@ export default function App() {
 
   const [rotaRows, setRotaRows] = useState([]);
   const [error, setError] = useState("");
+
+  const [swapMode, setSwapMode] = useState(false);
+  const [swapSelection, setSwapSelection] = useState([]); // [{ weekIndex, slot }]
+  const [swapError, setSwapError] = useState("");
 
   const startFriday = useMemo(() => {
     const picked = new Date(startDateISO + "T00:00:00");
@@ -264,28 +167,87 @@ export default function App() {
     setNames((prev) => (prev.length <= 1 ? prev : prev.slice(0, -1)));
   }
 
-  function randomise() {
-    const result = generateRota({
+  function generateLinear() {
+    const result = generateRotaLinearBalanced({
       names,
       startFriday,
       weeks: Number(weeks) || 0,
-      attempts: 200,
     });
     setError(result.error || "");
     setRotaRows(result.rows || []);
+    setSwapMode(false);
+    setSwapSelection([]);
+    setSwapError("");
   }
 
   function clearRota() {
     setError("");
     setRotaRows([]);
+    setSwapMode(false);
+    setSwapSelection([]);
+    setSwapError("");
   }
 
-  function setFullYear2026() {
-    setStartDateISO("2026-01-02");
-    setWeeks(52);
-    setError("");
-    setRotaRows([]);
+  function handleCellClick(sel) {
+    if (!swapMode) return;
+    setSwapError("");
+
+    setSwapSelection((prev) => {
+      const exists = prev.find((p) => p.weekIndex === sel.weekIndex && p.slot === sel.slot);
+      if (exists) return prev.filter((p) => !(p.weekIndex === sel.weekIndex && p.slot === sel.slot));
+
+      if (prev.length < 2) return [...prev, sel];
+      return [prev[1], sel];
+    });
   }
+
+  function clearSwapSelection() {
+    setSwapSelection([]);
+    setSwapError("");
+  }
+
+  function getSelectedNames() {
+    if (swapSelection.length !== 2) return { aName: null, bName: null };
+    const [a, b] = swapSelection;
+    const aName = rotaRows?.[a.weekIndex]?.[a.slot] ?? null;
+    const bName = rotaRows?.[b.weekIndex]?.[b.slot] ?? null;
+    return { aName, bName };
+  }
+
+  const { aName, bName } = getSelectedNames();
+  const canSwapDifferentNames =
+    swapSelection.length === 2 &&
+    aName &&
+    bName &&
+    aName.trim() !== "" &&
+    bName.trim() !== "" &&
+    aName !== bName;
+
+  // ✅ Manual swap: ignores all rota rules, only requires two different names
+  function doSwapSelected() {
+    if (swapSelection.length !== 2) return;
+
+    const [a, b] = swapSelection;
+    const nameA = rotaRows?.[a.weekIndex]?.[a.slot];
+    const nameB = rotaRows?.[b.weekIndex]?.[b.slot];
+
+    if (!nameA || !nameB) return;
+
+    if (nameA === nameB) {
+      setSwapError("Pick two different names to swap.");
+      return;
+    }
+
+    const swapped = swapAssignments(rotaRows, a, b);
+
+    setSwapError("");
+    setError("");
+    setRotaRows(swapped);
+    setSwapSelection([]);
+    setSwapMode(false);
+  }
+
+  const swapDisabled = !rotaRows || rotaRows.length === 0;
 
   return (
     <div style={{ fontFamily: "system-ui, Arial", padding: 16, maxWidth: 1100, margin: "0 auto" }}>
@@ -322,14 +284,11 @@ export default function App() {
             </label>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={randomise} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                Randomise rota
+              <button onClick={generateLinear} style={{ padding: "10px 12px", cursor: "pointer" }}>
+                Generate rota (linear)
               </button>
               <button onClick={clearRota} style={{ padding: "10px 12px", cursor: "pointer" }}>
                 Clear
-              </button>
-              <button onClick={setFullYear2026} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                Set full year 2026
               </button>
             </div>
 
@@ -340,8 +299,7 @@ export default function App() {
             ) : null}
 
             <div style={{ fontSize: 12, opacity: 0.75 }}>
-              Rules: No duplicates in same week • Weekend/Week balanced • If you do Weekend, you’re off next week •
-              Scheduling aims for steady gaps.
+              Rules apply at generation time only. Swaps are manual edits (rules ignored).
             </div>
           </div>
         </div>
@@ -359,8 +317,7 @@ export default function App() {
             </div>
           </div>
 
-        <table className="names-table" style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, color: "black" }}>
-
+          <table className="names-table" style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, color: "black" }}>
             <thead>
               <tr>
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8, width: 40 }}>#</th>
@@ -368,13 +325,13 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {names.map((n, i) => (
-                <tr key={i}>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{i + 1}</td>
+              {names.map((n, idx) => (
+                <tr key={idx}>
+                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{idx + 1}</td>
                   <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
                     <input
                       value={n}
-                      onChange={(e) => updateName(i, e.target.value)}
+                      onChange={(e) => updateName(idx, e.target.value)}
                       placeholder="Enter name"
                       style={{ width: "100%", padding: 8 }}
                     />
@@ -390,16 +347,40 @@ export default function App() {
         </div>
       </div>
 
-    <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-  <h3 style={{ marginTop: 0 }}>Rota</h3>
+      <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+          <h3 style={{ marginTop: 0 }}>Rota</h3>
+          <ExportButtons rows={rotaRows} startDateISO={startDateISO} weeks={weeks} />
+        </div>
 
-  <ExportButtons rows={rotaRows} startDateISO={startDateISO} weeks={weeks} />
+        <div style={{ marginTop: 10 }}>
+          <SwapModeControls
+            enabled={swapMode}
+            selectedCount={swapSelection.length}
+            disabled={!rotaRows || rotaRows.length === 0}
+            canSwap={canSwapDifferentNames}
+            onToggle={() => {
+              setSwapMode((v) => !v);
+              setSwapSelection([]);
+              setSwapError("");
+            }}
+            onClear={clearSwapSelection}
+            onSwap={doSwapSelected}
+          />
 
-  <div style={{ marginTop: 10 }}>
-    <RotaTable rows={rotaRows} />
-  </div>
-</div>
+          {swapError ? (
+            <div style={{ marginTop: 8, background: "#fff3cd", border: "1px solid #ffeeba", padding: 10, borderRadius: 6 }}>
+              {swapError}
+            </div>
+          ) : null}
+        </div>
 
+        <div style={{ marginTop: 10 }}>
+          <RotaTable rows={rotaRows} swapMode={swapMode} selected={swapSelection} onCellClick={handleCellClick} />
+        </div>
+
+        <ShiftCounter rows={rotaRows} />
+      </div>
     </div>
   );
 }
