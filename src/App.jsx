@@ -8,8 +8,6 @@ import SaveLoadControls from "./components/SaveLoadControls";
 import RotaStore from "./components/RotaStore";
 import { subscribePeople } from "./services/peopleService";
 import PeoplePicker from "./components/PeoplePicker";
-
-
 import "./App.css";
 
 function addDays(date, days) {
@@ -33,15 +31,6 @@ function formatUK(date) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-/**
- * Deterministic "linear" generator with duty-type balancing:
- * - Prefer people with fewer of the current duty type
- * - Prefer people whose Weekend and Week counts are closest (balance)
- * - Still iterates from a moving pointer so it feels sequential
- * - Constraints at generation time:
- *   - No duplicates in the same week
- *   - If someone does Weekend in week W, they cannot do ANY duty in week W+1
- */
 function generateRotaLinearBalanced({ names, startFriday, weeks }) {
   const cleanNames = (names || []).map((n) => String(n).trim()).filter(Boolean);
 
@@ -109,24 +98,18 @@ function generateRotaLinearBalanced({ names, startFriday, weeks }) {
 
   for (let w = 0; w < weeks; w++) {
     const exclude = new Set();
-    if (prevWeekend) exclude.add(prevWeekend); // cooldown: prev weekend person cannot do anything this week
+    if (prevWeekend) exclude.add(prevWeekend);
 
     const weekend = pickCandidate("weekend", exclude);
     if (!weekend) {
-      return {
-        rows: [],
-        error: "Could not allocate Weekend duty with current names/rules.",
-      };
+      return { rows: [], error: "Could not allocate Weekend duty with current names/rules." };
     }
 
-    exclude.add(weekend); // no duplicates same week
+    exclude.add(weekend);
 
     const weekDuty = pickCandidate("week", exclude);
     if (!weekDuty) {
-      return {
-        rows: [],
-        error: "Could not allocate Week duty with current names/rules.",
-      };
+      return { rows: [], error: "Could not allocate Week duty with current names/rules." };
     }
 
     weekendCount.set(weekend, (weekendCount.get(weekend) || 0) + 1);
@@ -166,7 +149,7 @@ function buildActiveNameSetFromRota(rows) {
 export default function App() {
   // Firestore people list + selection for generation
   const [people, setPeople] = useState([]);
-  const [selectedNames, setSelectedNames] = useState([]); // names picked for generation
+  const [selectedNames, setSelectedNames] = useState([]);
 
   // Settings
   const [weeks, setWeeks] = useState(52);
@@ -184,11 +167,17 @@ export default function App() {
   // Revision
   const [revision, setRevision] = useState(0);
 
-  // Global actions: swap / cover (two-person pick via ShiftCounter chips)
+  // Global actions: swap / cover-all (two person selection via ShiftCounter)
   const [twoPickMode, setTwoPickMode] = useState(null); // null | "swap" | "cover"
   const [twoPicked, setTwoPicked] = useState([]); // [first, second]
   const [peopleSwapError, setPeopleSwapError] = useState("");
   const [peopleCoverError, setPeopleCoverError] = useState("");
+
+  // Cover SINGLE shift (table-level)
+  const [coverShiftMode, setCoverShiftMode] = useState(false);
+  const [coverCell, setCoverCell] = useState(null); // { weekIndex, slot } | null
+  const [coveringPerson, setCoveringPerson] = useState("");
+  const [coverShiftError, setCoverShiftError] = useState("");
 
   const startFriday = useMemo(() => {
     const picked = new Date(startDateISO + "T00:00:00");
@@ -196,6 +185,18 @@ export default function App() {
   }, [startDateISO]);
 
   const activeNameSet = useMemo(() => buildActiveNameSetFromRota(rotaRows), [rotaRows]);
+
+  const coverCellText = useMemo(() => {
+    if (!coverCell) return "No cell selected";
+    const row = rotaRows?.[coverCell.weekIndex];
+    if (!row) return "No cell selected";
+
+    const date = row.weekCommencing instanceof Date ? formatUK(row.weekCommencing) : "";
+    const slotLabel = coverCell.slot === "weekend" ? "Weekend" : "Week";
+    const current = (row?.[coverCell.slot] ?? "").trim();
+
+    return `Selected: ${date} – ${slotLabel}${current ? ` (${current})` : ""}`;
+  }, [coverCell, rotaRows]);
 
   // Subscribe Firestore people
   useEffect(() => {
@@ -206,13 +207,13 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // -------- Two-person pick logic (shared by swap + cover) --------
-  const canApplyTwoPicked = twoPicked.length === 2 && twoPicked[0] && twoPicked[1] && twoPicked[0] !== twoPicked[1];
+  // -------- Two-person pick logic (swap / cover-all) --------
+  const canApplyTwoPicked =
+    twoPicked.length === 2 && twoPicked[0] && twoPicked[1] && twoPicked[0] !== twoPicked[1];
 
   function toggleTwoPick(name) {
     if (!twoPickMode) return;
 
-    // clear mode-specific error when picking
     if (twoPickMode === "swap") setPeopleSwapError("");
     if (twoPickMode === "cover") setPeopleCoverError("");
 
@@ -263,7 +264,6 @@ export default function App() {
       setRotaRows(swapPeopleInRota(first, second));
       setPeopleSwapError("");
     } else if (twoPickMode === "cover") {
-      // IMPORTANT: first = covering, second = covered
       setRotaRows(coverPeopleInRota(first, second));
       setPeopleCoverError("");
     }
@@ -279,8 +279,6 @@ export default function App() {
 
     if (s?.startDateISO) setStartDateISO(s.startDateISO);
     if (typeof s?.weeks === "number") setWeeks(s.weeks);
-
-    // When loading, restore who was "signed up" if present
     if (Array.isArray(s?.names)) setSelectedNames(s.names);
 
     if (Array.isArray(rows)) {
@@ -303,18 +301,30 @@ export default function App() {
     setTwoPicked([]);
     setPeopleSwapError("");
     setPeopleCoverError("");
+
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
+    setCoverShiftError("");
   }
 
   // -------- Generation --------
   function generateLinear() {
     setError("");
+
     setSwapMode(false);
     setSwapSelection([]);
     setSwapError("");
+
     setTwoPickMode(null);
     setTwoPicked([]);
     setPeopleSwapError("");
     setPeopleCoverError("");
+
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
+    setCoverShiftError("");
 
     if ((selectedNames?.length ?? 0) < 3) {
       setError("Pick at least 3 people to generate (weekend cooldown rule).");
@@ -334,20 +344,38 @@ export default function App() {
   function clearRota() {
     setError("");
     setRotaRows([]);
+
     setSwapMode(false);
     setSwapSelection([]);
     setSwapError("");
+
     setTwoPickMode(null);
     setTwoPicked([]);
     setPeopleSwapError("");
     setPeopleCoverError("");
+
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
+    setCoverShiftError("");
   }
 
-  // -------- Cell swap interactions --------
+  // -------- Cell interactions --------
   function handleCellClick(sel) {
-    if (!swapMode) return;
-    setSwapError("");
+    // Cover-single selection (one cell)
+    if (coverShiftMode) {
+      setCoverShiftError("");
+      setCoverCell((prev) => {
+        if (prev && prev.weekIndex === sel.weekIndex && prev.slot === sel.slot) return null;
+        return sel;
+      });
+      return;
+    }
 
+    // Swap-cell selection (two cells)
+    if (!swapMode) return;
+
+    setSwapError("");
     setSwapSelection((prev) => {
       const exists = prev.find((p) => p.weekIndex === sel.weekIndex && p.slot === sel.slot);
       if (exists) return prev.filter((p) => !(p.weekIndex === sel.weekIndex && p.slot === sel.slot));
@@ -384,7 +412,6 @@ export default function App() {
     const [a, b] = swapSelection;
     const nameA = rotaRows?.[a.weekIndex]?.[a.slot];
     const nameB = rotaRows?.[b.weekIndex]?.[b.slot];
-
     if (!nameA || !nameB) return;
 
     if (nameA === nameB) {
@@ -399,6 +426,43 @@ export default function App() {
     setRotaRows(swapped);
     setSwapSelection([]);
     setSwapMode(false);
+  }
+
+  function doCoverSingleShift() {
+    if (!coverCell) {
+      setCoverShiftError("Click a rota cell to cover (Weekend or Week).");
+      return;
+    }
+    if (!coveringPerson) {
+      setCoverShiftError("Pick a covering person from the dropdown.");
+      return;
+    }
+
+    const { weekIndex, slot } = coverCell;
+    const row = rotaRows?.[weekIndex];
+    if (!row) {
+      setCoverShiftError("That cell no longer exists.");
+      return;
+    }
+
+    const current = (row?.[slot] ?? "").trim();
+    if (!current) {
+      setCoverShiftError("That cell is empty.");
+      return;
+    }
+    if (current === coveringPerson) {
+      setCoverShiftError("That shift is already assigned to the selected covering person.");
+      return;
+    }
+
+    setRotaRows((prev) =>
+      (prev || []).map((r, idx) => (idx === weekIndex ? { ...r, [slot]: coveringPerson } : r)),
+    );
+
+    setCoverShiftError("");
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
   }
 
   const rotaDisabled = !rotaRows || rotaRows.length === 0;
@@ -530,6 +594,31 @@ export default function App() {
             }}
             onClear={clearSwapSelection}
             onSwap={doSwapSelected}
+            // Cover-single mode controls live here (your existing SwapModeControls supports these props)
+            coverEnabled={coverShiftMode}
+            coverTip={coverCellText}
+            coverApplyDisabled={!coverCell || !coveringPerson}
+            onToggleCover={() => {
+              // prevent clashes with swap selection
+              setSwapMode(false);
+              setSwapSelection([]);
+              setSwapError("");
+
+              // also prevent clashes with two-person pick modes
+              setTwoPickMode(null);
+              setTwoPicked([]);
+
+              setCoverShiftMode((v) => !v);
+              setCoverCell(null);
+              setCoveringPerson("");
+              setCoverShiftError("");
+            }}
+            onClearCover={() => {
+              setCoverCell(null);
+              setCoveringPerson("");
+              setCoverShiftError("");
+            }}
+            onApplyCover={doCoverSingleShift}
           />
 
           {swapError ? (
@@ -543,6 +632,73 @@ export default function App() {
               }}
             >
               {swapError}
+            </div>
+          ) : null}
+
+          {/* Cover-single inline person picker (table context, not ShiftCounter) */}
+          {coverShiftMode ? (
+            <div style={{ marginTop: 10 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.8 }}>Cover with:</div>
+
+                <select
+                  value={coveringPerson}
+                  onChange={(e) => {
+                    setCoverShiftError("");
+                    setCoveringPerson(e.target.value);
+                  }}
+                  style={{ padding: 8 }}
+                >
+                  <option value="">Select person…</option>
+                  {(selectedNames || []).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  disabled={!coverCell || !coveringPerson}
+                  onClick={doCoverSingleShift}
+                  style={{ padding: "8px 10px" }}
+                >
+                  Cover shift
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCoverCell(null);
+                    setCoveringPerson("");
+                    setCoverShiftError("");
+                  }}
+                  style={{ padding: "8px 10px" }}
+                >
+                  Clear
+                </button>
+              </div>
+
+              {coverShiftError ? (
+                <div
+                  style={{
+                    marginTop: 8,
+                    background: "#fff3cd",
+                    border: "1px solid #ffeeba",
+                    padding: 10,
+                    borderRadius: 6,
+                  }}
+                >
+                  {coverShiftError}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -573,49 +729,50 @@ export default function App() {
             swapMode={swapMode}
             selected={swapSelection}
             onCellClick={handleCellClick}
+            coverShiftMode={coverShiftMode}
+            coverCell={coverCell}
           />
         </div>
 
         <div style={{ marginTop: 12 }}>
-          {/* Swap panel (same as before, but selection is via ShiftCounter chips) */}
-         <PeopleTwoActionControls
-  title="Swap people"
-  tip="Tip: enable then click two people below."
-  enabled={twoPickMode === "swap"}
-  disabled={rotaDisabled}
-  selectedPeople={twoPicked}
-  canApply={canApplyTwoPicked}
-  applyLabel="Swap"
-  errorText={peopleSwapError}
-  onToggle={() => setMode("swap")}
-  onClear={clearTwoPick}
-  onApply={applyTwoPersonAction}
-  onRemovePerson={(name) => {
-    setTwoPicked((prev) => prev.filter((n) => n !== name));
-    setPeopleSwapError("");
-  }}
-/>
+          <PeopleTwoActionControls
+            title="Swap people"
+            tip="Tip: enable then click two people below."
+            enabled={twoPickMode === "swap"}
+            disabled={rotaDisabled}
+            selectedPeople={twoPicked}
+            canApply={canApplyTwoPicked}
+            applyLabel="Swap"
+            errorText={peopleSwapError}
+            onToggle={() => setMode("swap")}
+            onClear={clearTwoPick}
+            onApply={applyTwoPersonAction}
+            onRemovePerson={(name) => {
+              setTwoPicked((prev) => prev.filter((n) => n !== name));
+              setPeopleSwapError("");
+            }}
+          />
 
-<PeopleTwoActionControls
-  title="Cover all shifts"
-  tip="Tip: enable then click Covering then Covered below."
-  enabled={twoPickMode === "cover"}
-  disabled={rotaDisabled}
-  selectedPeople={twoPicked}
-  canApply={canApplyTwoPicked}
-  applyLabel="Cover all"
-  errorText={peopleCoverError}
-  onToggle={() => setMode("cover")}
-  onClear={clearTwoPick}
-  onApply={applyTwoPersonAction}
-  onRemovePerson={(name) => {
-    setTwoPicked((prev) => prev.filter((n) => n !== name));
-    setPeopleCoverError("");
-  }}
-/>
-
+          <PeopleTwoActionControls
+            title="Cover all shifts"
+            tip="Tip: enable then click Covering then Covered below."
+            enabled={twoPickMode === "cover"}
+            disabled={rotaDisabled}
+            selectedPeople={twoPicked}
+            canApply={canApplyTwoPicked}
+            applyLabel="Cover all"
+            errorText={peopleCoverError}
+            onToggle={() => setMode("cover")}
+            onClear={clearTwoPick}
+            onApply={applyTwoPersonAction}
+            onRemovePerson={(name) => {
+              setTwoPicked((prev) => prev.filter((n) => n !== name));
+              setPeopleCoverError("");
+            }}
+          />
         </div>
 
+        {/* ShiftCounter ONLY used for global two-person picking (swap + cover-all) */}
         <ShiftCounter
           rows={rotaRows}
           pickMode={twoPickMode != null}
