@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 
 export default function ShiftCounter({
   rows,
-  peopleSwapMode = false,
+  pickMode = false,
   selectedPeople = [], // ["dean","stan"]
   onPersonClick,
 }) {
@@ -34,7 +34,7 @@ export default function ShiftCounter({
   const isSelected = (name) => selectedPeople.includes(name);
 
   const rowStyle = (active) => ({
-    cursor: peopleSwapMode ? "pointer" : "default",
+    cursor: pickMode ? "pointer" : "default",
     boxShadow: active ? "0 0 0 3px #1976d2 inset" : "none",
     borderRadius: 4,
     userSelect: "none",
@@ -61,9 +61,9 @@ export default function ShiftCounter({
           {stats.map((s) => (
             <tr
               key={s.name}
-              onClick={() => peopleSwapMode && onPersonClick?.(s.name)}
+              onClick={() => pickMode && onPersonClick?.(s.name)}
               style={rowStyle(isSelected(s.name))}
-              title={peopleSwapMode ? "Click to select for swapping all shifts" : undefined}
+              title={pickMode ? "Click to select for swapping all shifts" : undefined}
             >
               <td>{s.name}</td>
               <td>{s.weekend}</td>
@@ -76,7 +76,7 @@ export default function ShiftCounter({
         </tbody>
       </table>
 
-      {peopleSwapMode ? (
+      {pickMode ? (
         <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
           This swaps every occurrence of the two people in the rota (Weekend + Week). Rules are ignored.
         </div>
