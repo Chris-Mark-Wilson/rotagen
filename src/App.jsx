@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import ExportButtons from "./components/ExportButtons";
 import RotaTable from "./components/RotaTable";
 import SwapModeControls from "./components/SwapModeControls";
@@ -6,6 +6,8 @@ import ShiftCounter from "./components/ShiftCounter";
 import PeopleSwapControls from "./components/PeopleSwapControls";
 import SaveLoadControls from "./components/SaveLoadControls";
 import RotaStore from "./components/RotaStore";
+import { subscribePeople } from "./services/peopleService";
+import PeoplePicker from "./components/PeoplePicker";
 
 import "./App.css";
 
@@ -147,26 +149,30 @@ function swapAssignments(rows, a, b) {
   return copy;
 }
 
+function buildActiveNameSetFromRota(rows) {
+  const counts = new Map();
+
+  // rows is your rotaRows array: [{ weekCommencing, weekend, week }, ...]
+  for (const r of rows || []) {
+    const weekend = (r?.weekend ?? "").trim();
+    const week = (r?.week ?? "").trim();
+
+    if (weekend) counts.set(weekend, (counts.get(weekend) ?? 0) + 1);
+    if (week) counts.set(week, (counts.get(week) ?? 0) + 1);
+  }
+
+  return new Set([...counts.keys()].filter((n) => (counts.get(n) ?? 0) > 0));
+}
+
+
 export default function App() {
   const [peopleSwapMode, setPeopleSwapMode] = useState(false);
   const [selectedPeople, setSelectedPeople] = useState([]); // ["dean", "stan"]
   const [peopleSwapError, setPeopleSwapError] = useState("");
+  const [people, setPeople] = useState([]);
+  const [selectedNames, setSelectedNames] = useState([]); // names picked for generation
 
-  const [names, setNames] = useState(() => {
-    const preset = [
-      "luke",
-      "dean",
-      "jason",
-      "chris",
-      "dom",
-      "andy",
-      "mick",
-      "paul",
-      "ralph",
-      "stan",
-    ];
-    return [...preset, ...Array.from({ length: 15 - preset.length }, () => "")];
-  });
+
 
   const [weeks, setWeeks] = useState(52);
   const [startDateISO, setStartDateISO] = useState("2026-01-02");
@@ -187,6 +193,59 @@ export default function App() {
     const picked = new Date(startDateISO + "T00:00:00");
     return getNextOrSameFriday(picked);
   }, [startDateISO]);
+
+  const activeNameSet = useMemo(() => {
+    return buildActiveNameSetFromRota(rotaRows);
+  }, [rotaRows]);
+
+  useEffect(() => {
+    const unsub = subscribePeople((list) => {
+      setPeople(list);
+
+      // Optional: if nothing selected yet, default-select everyone
+      setSelectedNames((prev) =>
+        prev.length ? prev : list.map((p) => p.name),
+      );
+    });
+
+    return () => unsub();
+  }, []);
+
+  function buildActiveNameSetFromRota(rota) {
+    const counts = new Map();
+
+    const visit = (node) => {
+      if (node == null) return;
+
+      if (typeof node === "string") {
+        const name = node.trim();
+        if (!name) return;
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+        return;
+      }
+
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+
+      if (typeof node === "object") {
+        // common patterns: { name: "Luke" } or { person: "Luke" }
+        if (typeof node.name === "string") visit(node.name);
+        if (typeof node.person === "string") visit(node.person);
+        if (typeof node.assignedTo === "string") visit(node.assignedTo);
+
+        // otherwise walk values
+        Object.values(node).forEach(visit);
+      }
+    };
+
+    visit(rota);
+
+    return new Set(
+      Array.from(counts.keys()).filter((n) => (counts.get(n) ?? 0) > 0),
+    );
+  }
 
   function togglePerson(name) {
     setPeopleSwapError("");
@@ -251,32 +310,27 @@ export default function App() {
     setPeopleSwapMode(false);
   }
 
-  function updateName(i, value) {
-    setNames((prev) => {
-      const next = [...prev];
-      next[i] = value;
-      return next;
-    });
-  }
 
-  function addRow() {
-    setNames((prev) => (prev.length >= 15 ? prev : [...prev, ""]));
-  }
 
-  function removeRow() {
-    setNames((prev) => (prev.length <= 1 ? prev : prev.slice(0, -1)));
-  }
+
 
   function generateLinear() {
+    
     setPeopleSwapMode(false);
     setSelectedPeople([]);
     setPeopleSwapError("");
-
+    
+    if ((selectedNames?.length ?? 0) < 3) {
+      setError("Pick at least 3 people to generate (weekend cooldown rule).");
+      return;
+    }
+    
     const result = generateRotaLinearBalanced({
-      names,
+      names: selectedNames,
       startFriday,
       weeks: Number(weeks) || 0,
     });
+
     setError(result.error || "");
     setRotaRows(result.rows || []);
     setSwapMode(false);
@@ -433,6 +487,12 @@ export default function App() {
                 Clear
               </button>
             </div>
+            <PeoplePicker
+              people={people}
+              selectedNames={selectedNames}
+              setSelectedNames={setSelectedNames}
+              activeNameSet={activeNameSet}
+            />
 
             {error ? <div className="alert">{error}</div> : null}
 
@@ -440,97 +500,6 @@ export default function App() {
               Rules apply at generation time only. Swaps are manual edits (rules
               ignored).
             </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            flex: "1 1 340px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            padding: 12,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: 0 }}>Names (max 15)</h3>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={addRow}
-                disabled={names.length >= 15}
-                style={{ padding: "8px 10px" }}
-              >
-                + Row
-              </button>
-              <button
-                onClick={removeRow}
-                disabled={names.length <= 1}
-                style={{ padding: "8px 10px" }}
-              >
-                − Row
-              </button>
-            </div>
-          </div>
-
-          <table
-            className="names-table"
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              marginTop: 10,
-              color: "black",
-            }}
-          >
-            <thead>
-              <tr>
-                <th
-                  style={{
-                    textAlign: "left",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                    width: 40,
-                  }}
-                >
-                  #
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                  }}
-                >
-                  Name
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {names.map((n, idx) => (
-                <tr key={idx}>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
-                    {idx + 1}
-                  </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
-                    <input
-                      value={n}
-                      onChange={(e) => updateName(idx, e.target.value)}
-                      placeholder="Enter name"
-                      style={{ width: "100%", padding: 8 }}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
-            Tip: leave unused rows blank — they’ll be ignored.
           </div>
         </div>
       </div>
@@ -591,7 +560,7 @@ export default function App() {
         </div>
 
         <SaveLoadControls
-          names={names}
+          names={selectedNames}
           weeks={weeks}
           startDateISO={startDateISO}
           rotaRows={rotaRows}
@@ -601,7 +570,7 @@ export default function App() {
         />
 
         <RotaStore
-          names={names}
+          names={selectedNames}
           weeks={weeks}
           startDateISO={startDateISO}
           rotaRows={rotaRows}
