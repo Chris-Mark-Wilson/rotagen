@@ -1,4 +1,6 @@
 import React from "react";
+import { exportElementToPng } from "../utils/exportPng";
+
 
 function formatUK(date) {
   const d = new Date(date);
@@ -96,12 +98,27 @@ export default function ExportButtons({ rows, startDateISO, weeks }) {
 
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <button onClick={exportCsv} disabled={disabled} style={{ padding: "10px 12px", cursor: "pointer" }}>
+      <button
+        onClick={exportCsv}
+        disabled={disabled}
+        style={{ padding: "10px 12px", cursor: "pointer" }}
+      >
         Export CSV
       </button>
-      <button onClick={exportExcel} disabled={disabled} style={{ padding: "10px 12px", cursor: "pointer" }}>
+      <button
+        onClick={exportExcel}
+        disabled={disabled}
+        style={{ padding: "10px 12px", cursor: "pointer" }}
+      >
         Export Excel
       </button>
+      <button
+        onClick={() => exportElementToPng("rota-print", "rota-admin.png")}
+        disabled={disabled}
+      >
+        Download admin PNG
+      </button>
+
       {disabled ? (
         <div style={{ fontSize: 12, opacity: 0.7, alignSelf: "center" }}>
           Generate a rota first to enable export.

@@ -8,6 +8,8 @@ import SaveLoadControls from "./components/SaveLoadControls";
 import RotaStore from "./components/RotaStore";
 import { subscribePeople } from "./services/peopleService";
 import PeoplePicker from "./components/PeoplePicker";
+import { exportElementToPng } from "./utils/exportPng";
+
 import "./App.css";
 
 function addDays(date, days) {
@@ -102,14 +104,20 @@ function generateRotaLinearBalanced({ names, startFriday, weeks }) {
 
     const weekend = pickCandidate("weekend", exclude);
     if (!weekend) {
-      return { rows: [], error: "Could not allocate Weekend duty with current names/rules." };
+      return {
+        rows: [],
+        error: "Could not allocate Weekend duty with current names/rules.",
+      };
     }
 
     exclude.add(weekend);
 
     const weekDuty = pickCandidate("week", exclude);
     if (!weekDuty) {
-      return { rows: [], error: "Could not allocate Week duty with current names/rules." };
+      return {
+        rows: [],
+        error: "Could not allocate Week duty with current names/rules.",
+      };
     }
 
     weekendCount.set(weekend, (weekendCount.get(weekend) || 0) + 1);
@@ -179,19 +187,26 @@ export default function App() {
   const [coveringPerson, setCoveringPerson] = useState("");
   const [coverShiftError, setCoverShiftError] = useState("");
 
+  const [exportName, setExportName] = useState("");
+
+
   const startFriday = useMemo(() => {
     const picked = new Date(startDateISO + "T00:00:00");
     return getNextOrSameFriday(picked);
   }, [startDateISO]);
 
-  const activeNameSet = useMemo(() => buildActiveNameSetFromRota(rotaRows), [rotaRows]);
+  const activeNameSet = useMemo(
+    () => buildActiveNameSetFromRota(rotaRows),
+    [rotaRows],
+  );
 
   const coverCellText = useMemo(() => {
     if (!coverCell) return "No cell selected";
     const row = rotaRows?.[coverCell.weekIndex];
     if (!row) return "No cell selected";
 
-    const date = row.weekCommencing instanceof Date ? formatUK(row.weekCommencing) : "";
+    const date =
+      row.weekCommencing instanceof Date ? formatUK(row.weekCommencing) : "";
     const slotLabel = coverCell.slot === "weekend" ? "Weekend" : "Week";
     const current = (row?.[coverCell.slot] ?? "").trim();
 
@@ -202,14 +217,19 @@ export default function App() {
   useEffect(() => {
     const unsub = subscribePeople((list) => {
       setPeople(list);
-      setSelectedNames((prev) => (prev.length ? prev : list.map((p) => p.name)));
+      setSelectedNames((prev) =>
+        prev.length ? prev : list.map((p) => p.name),
+      );
     });
     return () => unsub();
   }, []);
 
   // -------- Two-person pick logic (swap / cover-all) --------
   const canApplyTwoPicked =
-    twoPicked.length === 2 && twoPicked[0] && twoPicked[1] && twoPicked[0] !== twoPicked[1];
+    twoPicked.length === 2 &&
+    twoPicked[0] &&
+    twoPicked[1] &&
+    twoPicked[0] !== twoPicked[1];
 
   function toggleTwoPick(name) {
     if (!twoPickMode) return;
@@ -284,7 +304,9 @@ export default function App() {
     if (Array.isArray(rows)) {
       setRotaRows(
         rows.map((r) => ({
-          weekCommencing: new Date((r.weekCommencingISO || "1970-01-01") + "T00:00:00"),
+          weekCommencing: new Date(
+            (r.weekCommencingISO || "1970-01-01") + "T00:00:00",
+          ),
           weekend: r.weekend || "",
           week: r.week || "",
         })),
@@ -366,7 +388,8 @@ export default function App() {
     if (coverShiftMode) {
       setCoverShiftError("");
       setCoverCell((prev) => {
-        if (prev && prev.weekIndex === sel.weekIndex && prev.slot === sel.slot) return null;
+        if (prev && prev.weekIndex === sel.weekIndex && prev.slot === sel.slot)
+          return null;
         return sel;
       });
       return;
@@ -377,8 +400,13 @@ export default function App() {
 
     setSwapError("");
     setSwapSelection((prev) => {
-      const exists = prev.find((p) => p.weekIndex === sel.weekIndex && p.slot === sel.slot);
-      if (exists) return prev.filter((p) => !(p.weekIndex === sel.weekIndex && p.slot === sel.slot));
+      const exists = prev.find(
+        (p) => p.weekIndex === sel.weekIndex && p.slot === sel.slot,
+      );
+      if (exists)
+        return prev.filter(
+          (p) => !(p.weekIndex === sel.weekIndex && p.slot === sel.slot),
+        );
       if (prev.length < 2) return [...prev, sel];
       return [prev[1], sel];
     });
@@ -451,12 +479,16 @@ export default function App() {
       return;
     }
     if (current === coveringPerson) {
-      setCoverShiftError("That shift is already assigned to the selected covering person.");
+      setCoverShiftError(
+        "That shift is already assigned to the selected covering person.",
+      );
       return;
     }
 
     setRotaRows((prev) =>
-      (prev || []).map((r, idx) => (idx === weekIndex ? { ...r, [slot]: coveringPerson } : r)),
+      (prev || []).map((r, idx) =>
+        idx === weekIndex ? { ...r, [slot]: coveringPerson } : r,
+      ),
     );
 
     setCoverShiftError("");
@@ -733,6 +765,29 @@ export default function App() {
             coverCell={coverCell}
           />
         </div>
+        <div style={{ position: "absolute", left: -9999, top: 0 }}>
+          <div id="rota-print">
+            <h2>On-Call Rota</h2>
+            <table className="rota-table">
+              <thead>
+                <tr>
+                  <th>Week commencing</th>
+                  <th>Weekend</th>
+                  <th>Week</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rotaRows.map((r, i) => (
+                  <tr key={i}>
+                    <td>{formatUK(r.weekCommencing)}</td>
+                    <td>{r.weekend}</td>
+                    <td>{r.week}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         <div style={{ marginTop: 12 }}>
           <PeopleTwoActionControls
@@ -773,12 +828,76 @@ export default function App() {
         </div>
 
         {/* ShiftCounter ONLY used for global two-person picking (swap + cover-all) */}
-        <ShiftCounter
-          rows={rotaRows}
-          pickMode={twoPickMode != null}
-          selectedPeople={twoPicked}
-          onPersonClick={toggleTwoPick}
-        />
+<ShiftCounter
+  rows={rotaRows}
+  pickMode={twoPickMode != null}
+  selectedPeople={twoPicked}
+  onPersonClick={toggleTwoPick}
+/>
+
+{/* --- PNG Export (per-person) --- */}
+<div style={{ marginTop: 12 }}>
+  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    <div style={{ fontWeight: 600 }}>Export person PNG:</div>
+
+    <select
+      value={exportName}
+      onChange={(e) => setExportName(e.target.value)}
+      style={{ padding: 8 }}
+      disabled={!rotaRows || rotaRows.length === 0}
+    >
+      <option value="">Select person…</option>
+      {(selectedNames || []).map((n) => (
+        <option key={n} value={n}>
+          {n}
+        </option>
+      ))}
+    </select>
+
+    <button
+      type="button"
+      disabled={!exportName}
+      onClick={() => exportElementToPng("rota-person-export", `${exportName}-rota.png`)}
+      style={{ padding: "8px 10px" }}
+    >
+      Download PNG
+    </button>
+  </div>
+
+  {/* hidden export target */}
+  <div style={{ position: "absolute", left: -9999, top: 0 }}>
+    <div id="rota-person-export">
+      <h2 style={{ margin: "0 0 8px 0" }}>{exportName} – On-Call Rota</h2>
+
+      <table className="rota-table">
+        <thead>
+          <tr>
+            <th style={{ width: "30%" }}>Week commencing (Friday)</th>
+            <th>Duty</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rotaRows
+            .filter((r) => r.weekend === exportName || r.week === exportName)
+            .map((r, i) => (
+              <tr key={i}>
+                <td>{formatUK(r.weekCommencing)}</td>
+                <td>
+                  {r.weekend === exportName ? "Weekend" : ""}
+                  {r.weekend === exportName && r.week === exportName ? " + " : ""}
+                  {r.week === exportName ? "Week" : ""}
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+        
+      
+
       </div>
     </div>
   );
