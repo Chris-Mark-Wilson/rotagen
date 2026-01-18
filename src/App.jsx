@@ -434,18 +434,7 @@ export default function App() {
               </button>
             </div>
 
-            {error ? (
-              <div
-                style={{
-                  background: "#fff3cd",
-                  border: "1px solid #ffeeba",
-                  padding: 10,
-                  borderRadius: 6,
-                }}
-              >
-                {error}
-              </div>
-            ) : null}
+            {error ? <div className="alert">{error}</div> : null}
 
             <div style={{ fontSize: 12, opacity: 0.75 }}>
               Rules apply at generation time only. Swaps are manual edits (rules

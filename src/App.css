@@ -57,5 +57,17 @@ table tbody tr:hover {
 .striped-table tbody tr:hover {
   background-color: #fff9c4;
 }
+/* ---------- ALERT / WARNING BOX ---------- */
+.alert {
+  background-color: #fff3cd;
+  border: 1px solid #ffeeba;
+  padding: 10px;
+  border-radius: 6px;
+  color: #212529;            /* 🔑 force readable text */
+}
+
+.alert strong {
+  color: #212529;
+}
 
 

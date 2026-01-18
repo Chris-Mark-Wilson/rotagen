@@ -164,7 +164,7 @@ export default function RotaStore({ names, weeks, startDateISO, rotaRows, onLoad
       </div>
 
       {status ? (
-        <div style={{ marginTop: 10, background: "#fff3cd", border: "1px solid #ffeeba", padding: 10, borderRadius: 6 }}>
+        <div style={{ marginTop: 10, background: "#fff3cd", border: "1px solid #ffeeba",color:"black", padding: 10, borderRadius: 6 }}>
           {status}
         </div>
       ) : null}
