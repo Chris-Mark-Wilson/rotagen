@@ -13,17 +13,35 @@ export default function RotaTable({
   swapMode = false,
   selected = [], // [{ weekIndex, slot }]
   onCellClick,
+
+  // NEW: cover single shift support (does not break styling)
+  coverShiftMode = false,
+  coverCell = null, // { weekIndex, slot } | null
 }) {
-  const isSelected = (weekIndex, slot) =>
+  const isSelectedSwap = (weekIndex, slot) =>
     selected.some((s) => s.weekIndex === weekIndex && s.slot === slot);
 
+  const isSelectedCover = (weekIndex, slot) =>
+    !!coverShiftMode &&
+    !!coverCell &&
+    coverCell.weekIndex === weekIndex &&
+    coverCell.slot === slot;
+
   // IMPORTANT: use inset box-shadow (NOT border) so table doesn't resize
-  const cellStyle = (active) => ({
-    cursor: swapMode ? "pointer" : "default",
-    boxShadow: active ? "0 0 0 3px #1976d2 inset" : "none",
+  // - Swap selection: blue ring (existing)
+  // - Cover selection: green ring (new)
+  const cellStyle = (swapActive, coverActive) => ({
+    cursor: swapMode || coverShiftMode ? "pointer" : "default",
+    boxShadow: swapActive
+      ? "0 0 0 3px #1976d2 inset"
+      : coverActive
+        ? "0 0 0 3px #16a34a inset"
+        : "none",
     borderRadius: 4,
     userSelect: "none",
   });
+
+  const canClickCells = swapMode || coverShiftMode;
 
   return (
     <table className="rota-table">
@@ -47,17 +65,39 @@ export default function RotaTable({
               <td>{formatUK(r.weekCommencing)}</td>
 
               <td
-                onClick={() => swapMode && onCellClick?.({ weekIndex: idx, slot: "weekend" })}
-                style={cellStyle(isSelected(idx, "weekend"))}
-                title={swapMode ? "Click to select for swapping" : undefined}
+                onClick={() =>
+                  canClickCells && onCellClick?.({ weekIndex: idx, slot: "weekend" })
+                }
+                style={cellStyle(
+                  isSelectedSwap(idx, "weekend"),
+                  isSelectedCover(idx, "weekend"),
+                )}
+                title={
+                  swapMode
+                    ? "Click to select for swapping"
+                    : coverShiftMode
+                      ? "Click to select for covering"
+                      : undefined
+                }
               >
                 {r.weekend}
               </td>
 
               <td
-                onClick={() => swapMode && onCellClick?.({ weekIndex: idx, slot: "week" })}
-                style={cellStyle(isSelected(idx, "week"))}
-                title={swapMode ? "Click to select for swapping" : undefined}
+                onClick={() =>
+                  canClickCells && onCellClick?.({ weekIndex: idx, slot: "week" })
+                }
+                style={cellStyle(
+                  isSelectedSwap(idx, "week"),
+                  isSelectedCover(idx, "week"),
+                )}
+                title={
+                  swapMode
+                    ? "Click to select for swapping"
+                    : coverShiftMode
+                      ? "Click to select for covering"
+                      : undefined
+                }
               >
                 {r.week}
               </td>

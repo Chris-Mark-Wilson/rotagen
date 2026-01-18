@@ -1,11 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import ExportButtons from "./components/ExportButtons";
 import RotaTable from "./components/RotaTable";
 import SwapModeControls from "./components/SwapModeControls";
 import ShiftCounter from "./components/ShiftCounter";
-import PeopleSwapControls from "./components/PeopleSwapControls";
+import PeopleTwoActionControls from "./components/PeopleTwoActionControls";
 import SaveLoadControls from "./components/SaveLoadControls";
 import RotaStore from "./components/RotaStore";
+import { subscribePeople } from "./services/peopleService";
+import PeoplePicker from "./components/PeoplePicker";
+import { exportElementToPng } from "./utils/exportPng";
 
 import "./App.css";
 
@@ -30,17 +33,8 @@ function formatUK(date) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-/**
- * Deterministic "linear" generator with duty-type balancing:
- * - Prefer people with fewer of the current duty type
- * - Prefer people whose Weekend and Week counts are closest (balance)
- * - Still iterates from a moving pointer so it feels sequential
- * - Constraints at generation time:
- *   - No duplicates in the same week
- *   - If someone does Weekend in week W, they cannot do ANY duty in week W+1
- */
 function generateRotaLinearBalanced({ names, startFriday, weeks }) {
-  const cleanNames = names.map((n) => n.trim()).filter(Boolean);
+  const cleanNames = (names || []).map((n) => String(n).trim()).filter(Boolean);
 
   if (cleanNames.length < 3) {
     return {
@@ -106,23 +100,25 @@ function generateRotaLinearBalanced({ names, startFriday, weeks }) {
 
   for (let w = 0; w < weeks; w++) {
     const exclude = new Set();
-    if (prevWeekend) exclude.add(prevWeekend); // cooldown: prev weekend person cannot do anything this week
+    if (prevWeekend) exclude.add(prevWeekend);
 
     const weekend = pickCandidate("weekend", exclude);
-    if (!weekend)
+    if (!weekend) {
       return {
         rows: [],
         error: "Could not allocate Weekend duty with current names/rules.",
       };
+    }
 
-    exclude.add(weekend); // no duplicates same week
+    exclude.add(weekend);
 
     const weekDuty = pickCandidate("week", exclude);
-    if (!weekDuty)
+    if (!weekDuty) {
       return {
         rows: [],
         error: "Could not allocate Week duty with current names/rules.",
       };
+    }
 
     weekendCount.set(weekend, (weekendCount.get(weekend) || 0) + 1);
     weekCount.set(weekDuty, (weekCount.get(weekDuty) || 0) + 1);
@@ -147,64 +143,163 @@ function swapAssignments(rows, a, b) {
   return copy;
 }
 
+function buildActiveNameSetFromRota(rows) {
+  const set = new Set();
+  for (const r of rows || []) {
+    const weekend = (r?.weekend ?? "").trim();
+    const week = (r?.week ?? "").trim();
+    if (weekend) set.add(weekend);
+    if (week) set.add(week);
+  }
+  return set;
+}
+
 export default function App() {
-  const [peopleSwapMode, setPeopleSwapMode] = useState(false);
-  const [selectedPeople, setSelectedPeople] = useState([]); // ["dean", "stan"]
-  const [peopleSwapError, setPeopleSwapError] = useState("");
+  // Firestore people list + selection for generation
+  const [people, setPeople] = useState([]);
+  const [selectedNames, setSelectedNames] = useState([]);
 
-  const [names, setNames] = useState(() => {
-    const preset = [
-      "luke",
-      "dean",
-      "jason",
-      "chris",
-      "dom",
-      "andy",
-      "mick",
-      "paul",
-      "ralph",
-      "stan",
-    ];
-    return [...preset, ...Array.from({ length: 15 - preset.length }, () => "")];
-  });
-
+  // Settings
   const [weeks, setWeeks] = useState(52);
   const [startDateISO, setStartDateISO] = useState("2026-01-02");
 
+  // Rota + errors
   const [rotaRows, setRotaRows] = useState([]);
   const [error, setError] = useState("");
 
+  // Cell swap mode
   const [swapMode, setSwapMode] = useState(false);
   const [swapSelection, setSwapSelection] = useState([]); // [{ weekIndex, slot }]
   const [swapError, setSwapError] = useState("");
 
+  // Revision
   const [revision, setRevision] = useState(0);
 
-  const canSwapPeople =
-    selectedPeople.length === 2 && selectedPeople[0] !== selectedPeople[1];
+  // Global actions: swap / cover-all (two person selection via ShiftCounter)
+  const [twoPickMode, setTwoPickMode] = useState(null); // null | "swap" | "cover"
+  const [twoPicked, setTwoPicked] = useState([]); // [first, second]
+  const [peopleSwapError, setPeopleSwapError] = useState("");
+  const [peopleCoverError, setPeopleCoverError] = useState("");
+
+  // Cover SINGLE shift (table-level)
+  const [coverShiftMode, setCoverShiftMode] = useState(false);
+  const [coverCell, setCoverCell] = useState(null); // { weekIndex, slot } | null
+  const [coveringPerson, setCoveringPerson] = useState("");
+  const [coverShiftError, setCoverShiftError] = useState("");
+
+  const [exportName, setExportName] = useState("");
+
 
   const startFriday = useMemo(() => {
     const picked = new Date(startDateISO + "T00:00:00");
     return getNextOrSameFriday(picked);
   }, [startDateISO]);
 
-  function togglePerson(name) {
-    setPeopleSwapError("");
-    setSelectedPeople((prev) => {
+  const activeNameSet = useMemo(
+    () => buildActiveNameSetFromRota(rotaRows),
+    [rotaRows],
+  );
+
+  const coverCellText = useMemo(() => {
+    if (!coverCell) return "No cell selected";
+    const row = rotaRows?.[coverCell.weekIndex];
+    if (!row) return "No cell selected";
+
+    const date =
+      row.weekCommencing instanceof Date ? formatUK(row.weekCommencing) : "";
+    const slotLabel = coverCell.slot === "weekend" ? "Weekend" : "Week";
+    const current = (row?.[coverCell.slot] ?? "").trim();
+
+    return `Selected: ${date} – ${slotLabel}${current ? ` (${current})` : ""}`;
+  }, [coverCell, rotaRows]);
+
+  // Subscribe Firestore people
+  useEffect(() => {
+    const unsub = subscribePeople((list) => {
+      setPeople(list);
+      setSelectedNames((prev) =>
+        prev.length ? prev : list.map((p) => p.name),
+      );
+    });
+    return () => unsub();
+  }, []);
+
+  // -------- Two-person pick logic (swap / cover-all) --------
+  const canApplyTwoPicked =
+    twoPicked.length === 2 &&
+    twoPicked[0] &&
+    twoPicked[1] &&
+    twoPicked[0] !== twoPicked[1];
+
+  function toggleTwoPick(name) {
+    if (!twoPickMode) return;
+
+    if (twoPickMode === "swap") setPeopleSwapError("");
+    if (twoPickMode === "cover") setPeopleCoverError("");
+
+    setTwoPicked((prev) => {
       if (prev.includes(name)) return prev.filter((n) => n !== name);
       if (prev.length < 2) return [...prev, name];
-      return [prev[1], name]; // replace oldest if already 2
+      return [prev[1], name];
     });
   }
 
+  function clearTwoPick() {
+    setTwoPicked([]);
+    setPeopleSwapError("");
+    setPeopleCoverError("");
+  }
+
+  function setMode(modeOrNull) {
+    setTwoPickMode((prev) => {
+      const next = prev === modeOrNull ? null : modeOrNull;
+      return next;
+    });
+    clearTwoPick();
+  }
+
+  // -------- Rota transforms --------
+  function swapPeopleInRota(a, b) {
+    return (rotaRows || []).map((r) => {
+      const weekend = r.weekend === a ? b : r.weekend === b ? a : r.weekend;
+      const week = r.week === a ? b : r.week === b ? a : r.week;
+      return { ...r, weekend, week };
+    });
+  }
+
+  function coverPeopleInRota(covering, covered) {
+    return (rotaRows || []).map((r) => {
+      const weekend = r.weekend === covered ? covering : r.weekend;
+      const week = r.week === covered ? covering : r.week;
+      return { ...r, weekend, week };
+    });
+  }
+
+  function applyTwoPersonAction() {
+    if (!canApplyTwoPicked) return;
+
+    const [first, second] = twoPicked;
+
+    if (twoPickMode === "swap") {
+      setRotaRows(swapPeopleInRota(first, second));
+      setPeopleSwapError("");
+    } else if (twoPickMode === "cover") {
+      setRotaRows(coverPeopleInRota(first, second));
+      setPeopleCoverError("");
+    }
+
+    setTwoPickMode(null);
+    setTwoPicked([]);
+  }
+
+  // -------- Save/load payload --------
   function applyLoadedPayload(payload) {
-    // payload: { settings, rows, meta }
     const s = payload?.settings;
     const rows = payload?.rows;
 
     if (s?.startDateISO) setStartDateISO(s.startDateISO);
     if (typeof s?.weeks === "number") setWeeks(s.weeks);
-    if (Array.isArray(s?.names)) setNames(s.names);
+    if (Array.isArray(s?.names)) setSelectedNames(s.names);
 
     if (Array.isArray(rows)) {
       setRotaRows(
@@ -224,82 +319,86 @@ export default function App() {
     setSwapMode(false);
     setSwapSelection([]);
     setSwapError("");
+    setTwoPickMode(null);
+    setTwoPicked([]);
+    setPeopleSwapError("");
+    setPeopleCoverError("");
+
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
+    setCoverShiftError("");
   }
 
-  function swapPeopleInRota(a, b) {
-    return (rotaRows || []).map((r) => {
-      const weekend = r.weekend === a ? b : r.weekend === b ? a : r.weekend;
-      const week = r.week === a ? b : r.week === b ? a : r.week;
-      return { ...r, weekend, week };
-    });
-  }
+  // -------- Generation --------
+  function generateLinear() {
+    setError("");
 
-  function doSwapPeople() {
-    if (!canSwapPeople) return;
-    const [a, b] = selectedPeople;
+    setSwapMode(false);
+    setSwapSelection([]);
+    setSwapError("");
 
-    if (!a || !b || a === b) {
-      setPeopleSwapError("Pick two different people to swap.");
+    setTwoPickMode(null);
+    setTwoPicked([]);
+    setPeopleSwapError("");
+    setPeopleCoverError("");
+
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
+    setCoverShiftError("");
+
+    if ((selectedNames?.length ?? 0) < 3) {
+      setError("Pick at least 3 people to generate (weekend cooldown rule).");
       return;
     }
 
-    const swapped = swapPeopleInRota(a, b);
-    setRotaRows(swapped);
-
-    setPeopleSwapError("");
-    setSelectedPeople([]);
-    setPeopleSwapMode(false);
-  }
-
-  function updateName(i, value) {
-    setNames((prev) => {
-      const next = [...prev];
-      next[i] = value;
-      return next;
-    });
-  }
-
-  function addRow() {
-    setNames((prev) => (prev.length >= 15 ? prev : [...prev, ""]));
-  }
-
-  function removeRow() {
-    setNames((prev) => (prev.length <= 1 ? prev : prev.slice(0, -1)));
-  }
-
-  function generateLinear() {
-    setPeopleSwapMode(false);
-    setSelectedPeople([]);
-    setPeopleSwapError("");
-
     const result = generateRotaLinearBalanced({
-      names,
+      names: selectedNames,
       startFriday,
       weeks: Number(weeks) || 0,
     });
+
     setError(result.error || "");
     setRotaRows(result.rows || []);
-    setSwapMode(false);
-    setSwapSelection([]);
-    setSwapError("");
   }
 
   function clearRota() {
-    setPeopleSwapMode(false);
-    setSelectedPeople([]);
-    setPeopleSwapError("");
-
     setError("");
     setRotaRows([]);
+
     setSwapMode(false);
     setSwapSelection([]);
     setSwapError("");
+
+    setTwoPickMode(null);
+    setTwoPicked([]);
+    setPeopleSwapError("");
+    setPeopleCoverError("");
+
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
+    setCoverShiftError("");
   }
 
+  // -------- Cell interactions --------
   function handleCellClick(sel) {
-    if (!swapMode) return;
-    setSwapError("");
+    // Cover-single selection (one cell)
+    if (coverShiftMode) {
+      setCoverShiftError("");
+      setCoverCell((prev) => {
+        if (prev && prev.weekIndex === sel.weekIndex && prev.slot === sel.slot)
+          return null;
+        return sel;
+      });
+      return;
+    }
 
+    // Swap-cell selection (two cells)
+    if (!swapMode) return;
+
+    setSwapError("");
     setSwapSelection((prev) => {
       const exists = prev.find(
         (p) => p.weekIndex === sel.weekIndex && p.slot === sel.slot,
@@ -308,7 +407,6 @@ export default function App() {
         return prev.filter(
           (p) => !(p.weekIndex === sel.weekIndex && p.slot === sel.slot),
         );
-
       if (prev.length < 2) return [...prev, sel];
       return [prev[1], sel];
     });
@@ -319,7 +417,7 @@ export default function App() {
     setSwapError("");
   }
 
-  function getSelectedNames() {
+  function getSelectedNamesForCellSwap() {
     if (swapSelection.length !== 2) return { aName: null, bName: null };
     const [a, b] = swapSelection;
     const aName = rotaRows?.[a.weekIndex]?.[a.slot] ?? null;
@@ -327,7 +425,7 @@ export default function App() {
     return { aName, bName };
   }
 
-  const { aName, bName } = getSelectedNames();
+  const { aName, bName } = getSelectedNamesForCellSwap();
   const canSwapDifferentNames =
     swapSelection.length === 2 &&
     aName &&
@@ -336,14 +434,12 @@ export default function App() {
     bName.trim() !== "" &&
     aName !== bName;
 
-  // ✅ Manual swap: ignores all rota rules, only requires two different names
   function doSwapSelected() {
     if (swapSelection.length !== 2) return;
 
     const [a, b] = swapSelection;
     const nameA = rotaRows?.[a.weekIndex]?.[a.slot];
     const nameB = rotaRows?.[b.weekIndex]?.[b.slot];
-
     if (!nameA || !nameB) return;
 
     if (nameA === nameB) {
@@ -360,7 +456,48 @@ export default function App() {
     setSwapMode(false);
   }
 
-  const swapDisabled = !rotaRows || rotaRows.length === 0;
+  function doCoverSingleShift() {
+    if (!coverCell) {
+      setCoverShiftError("Click a rota cell to cover (Weekend or Week).");
+      return;
+    }
+    if (!coveringPerson) {
+      setCoverShiftError("Pick a covering person from the dropdown.");
+      return;
+    }
+
+    const { weekIndex, slot } = coverCell;
+    const row = rotaRows?.[weekIndex];
+    if (!row) {
+      setCoverShiftError("That cell no longer exists.");
+      return;
+    }
+
+    const current = (row?.[slot] ?? "").trim();
+    if (!current) {
+      setCoverShiftError("That cell is empty.");
+      return;
+    }
+    if (current === coveringPerson) {
+      setCoverShiftError(
+        "That shift is already assigned to the selected covering person.",
+      );
+      return;
+    }
+
+    setRotaRows((prev) =>
+      (prev || []).map((r, idx) =>
+        idx === weekIndex ? { ...r, [slot]: coveringPerson } : r,
+      ),
+    );
+
+    setCoverShiftError("");
+    setCoverShiftMode(false);
+    setCoverCell(null);
+    setCoveringPerson("");
+  }
+
+  const rotaDisabled = !rotaRows || rotaRows.length === 0;
 
   return (
     <div
@@ -434,103 +571,19 @@ export default function App() {
               </button>
             </div>
 
+            <PeoplePicker
+              people={people}
+              selectedNames={selectedNames}
+              setSelectedNames={setSelectedNames}
+              activeNameSet={activeNameSet}
+            />
+
             {error ? <div className="alert">{error}</div> : null}
 
             <div style={{ fontSize: 12, opacity: 0.75 }}>
-              Rules apply at generation time only. Swaps are manual edits (rules
-              ignored).
+              Rules apply at generation time only. Swaps/covers are manual edits
+              (rules ignored).
             </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            flex: "1 1 340px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            padding: 12,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: 0 }}>Names (max 15)</h3>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={addRow}
-                disabled={names.length >= 15}
-                style={{ padding: "8px 10px" }}
-              >
-                + Row
-              </button>
-              <button
-                onClick={removeRow}
-                disabled={names.length <= 1}
-                style={{ padding: "8px 10px" }}
-              >
-                − Row
-              </button>
-            </div>
-          </div>
-
-          <table
-            className="names-table"
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              marginTop: 10,
-              color: "black",
-            }}
-          >
-            <thead>
-              <tr>
-                <th
-                  style={{
-                    textAlign: "left",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                    width: 40,
-                  }}
-                >
-                  #
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                  }}
-                >
-                  Name
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {names.map((n, idx) => (
-                <tr key={idx}>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
-                    {idx + 1}
-                  </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
-                    <input
-                      value={n}
-                      onChange={(e) => updateName(idx, e.target.value)}
-                      placeholder="Enter name"
-                      style={{ width: "100%", padding: 8 }}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
-            Tip: leave unused rows blank — they’ll be ignored.
           </div>
         </div>
       </div>
@@ -564,7 +617,7 @@ export default function App() {
           <SwapModeControls
             enabled={swapMode}
             selectedCount={swapSelection.length}
-            disabled={!rotaRows || rotaRows.length === 0}
+            disabled={rotaDisabled}
             canSwap={canSwapDifferentNames}
             onToggle={() => {
               setSwapMode((v) => !v);
@@ -573,6 +626,31 @@ export default function App() {
             }}
             onClear={clearSwapSelection}
             onSwap={doSwapSelected}
+            // Cover-single mode controls live here (your existing SwapModeControls supports these props)
+            coverEnabled={coverShiftMode}
+            coverTip={coverCellText}
+            coverApplyDisabled={!coverCell || !coveringPerson}
+            onToggleCover={() => {
+              // prevent clashes with swap selection
+              setSwapMode(false);
+              setSwapSelection([]);
+              setSwapError("");
+
+              // also prevent clashes with two-person pick modes
+              setTwoPickMode(null);
+              setTwoPicked([]);
+
+              setCoverShiftMode((v) => !v);
+              setCoverCell(null);
+              setCoveringPerson("");
+              setCoverShiftError("");
+            }}
+            onClearCover={() => {
+              setCoverCell(null);
+              setCoveringPerson("");
+              setCoverShiftError("");
+            }}
+            onApplyCover={doCoverSingleShift}
           />
 
           {swapError ? (
@@ -588,10 +666,77 @@ export default function App() {
               {swapError}
             </div>
           ) : null}
+
+          {/* Cover-single inline person picker (table context, not ShiftCounter) */}
+          {coverShiftMode ? (
+            <div style={{ marginTop: 10 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.8 }}>Cover with:</div>
+
+                <select
+                  value={coveringPerson}
+                  onChange={(e) => {
+                    setCoverShiftError("");
+                    setCoveringPerson(e.target.value);
+                  }}
+                  style={{ padding: 8 }}
+                >
+                  <option value="">Select person…</option>
+                  {(selectedNames || []).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  disabled={!coverCell || !coveringPerson}
+                  onClick={doCoverSingleShift}
+                  style={{ padding: "8px 10px" }}
+                >
+                  Cover shift
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCoverCell(null);
+                    setCoveringPerson("");
+                    setCoverShiftError("");
+                  }}
+                  style={{ padding: "8px 10px" }}
+                >
+                  Clear
+                </button>
+              </div>
+
+              {coverShiftError ? (
+                <div
+                  style={{
+                    marginTop: 8,
+                    background: "#fff3cd",
+                    border: "1px solid #ffeeba",
+                    padding: 10,
+                    borderRadius: 6,
+                  }}
+                >
+                  {coverShiftError}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <SaveLoadControls
-          names={names}
+          names={selectedNames}
           weeks={weeks}
           startDateISO={startDateISO}
           rotaRows={rotaRows}
@@ -601,7 +746,7 @@ export default function App() {
         />
 
         <RotaStore
-          names={names}
+          names={selectedNames}
           weeks={weeks}
           startDateISO={startDateISO}
           rotaRows={rotaRows}
@@ -616,51 +761,143 @@ export default function App() {
             swapMode={swapMode}
             selected={swapSelection}
             onCellClick={handleCellClick}
+            coverShiftMode={coverShiftMode}
+            coverCell={coverCell}
           />
         </div>
+        <div style={{ position: "absolute", left: -9999, top: 0 }}>
+          <div id="rota-print">
+            <h2>On-Call Rota</h2>
+            <table className="rota-table">
+              <thead>
+                <tr>
+                  <th>Week commencing</th>
+                  <th>Weekend</th>
+                  <th>Week</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rotaRows.map((r, i) => (
+                  <tr key={i}>
+                    <td>{formatUK(r.weekCommencing)}</td>
+                    <td>{r.weekend}</td>
+                    <td>{r.week}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div style={{ marginTop: 12 }}>
-          <PeopleSwapControls
-            enabled={peopleSwapMode}
-            selectedPeople={selectedPeople}
-            disabled={!rotaRows || rotaRows.length === 0}
-            canSwap={canSwapPeople}
-            onToggle={() => {
-              setPeopleSwapMode((v) => !v);
-              setSelectedPeople([]);
-              setPeopleSwapError("");
-            }}
-            onClear={() => {
-              setSelectedPeople([]);
-              setPeopleSwapError("");
-            }}
-            onSwap={doSwapPeople}
+          <PeopleTwoActionControls
+            title="Swap people"
+            tip="Tip: enable then click two people below."
+            enabled={twoPickMode === "swap"}
+            disabled={rotaDisabled}
+            selectedPeople={twoPicked}
+            canApply={canApplyTwoPicked}
+            applyLabel="Swap"
+            errorText={peopleSwapError}
+            onToggle={() => setMode("swap")}
+            onClear={clearTwoPick}
+            onApply={applyTwoPersonAction}
             onRemovePerson={(name) => {
-              setSelectedPeople((prev) => prev.filter((n) => n !== name));
+              setTwoPicked((prev) => prev.filter((n) => n !== name));
               setPeopleSwapError("");
             }}
           />
 
-          {peopleSwapError ? (
-            <div
-              style={{
-                marginTop: 8,
-                background: "#fff3cd",
-                border: "1px solid #ffeeba",
-                padding: 10,
-                borderRadius: 6,
-              }}
-            >
-              {peopleSwapError}
-            </div>
-          ) : null}
+          <PeopleTwoActionControls
+            title="Cover all shifts"
+            tip="Tip: enable then click Covering then Covered below."
+            enabled={twoPickMode === "cover"}
+            disabled={rotaDisabled}
+            selectedPeople={twoPicked}
+            canApply={canApplyTwoPicked}
+            applyLabel="Cover all"
+            errorText={peopleCoverError}
+            onToggle={() => setMode("cover")}
+            onClear={clearTwoPick}
+            onApply={applyTwoPersonAction}
+            onRemovePerson={(name) => {
+              setTwoPicked((prev) => prev.filter((n) => n !== name));
+              setPeopleCoverError("");
+            }}
+          />
         </div>
 
-        <ShiftCounter
-          rows={rotaRows}
-          peopleSwapMode={peopleSwapMode}
-          selectedPeople={selectedPeople}
-          onPersonClick={togglePerson}
-        />
+        {/* ShiftCounter ONLY used for global two-person picking (swap + cover-all) */}
+<ShiftCounter
+  rows={rotaRows}
+  pickMode={twoPickMode != null}
+  selectedPeople={twoPicked}
+  onPersonClick={toggleTwoPick}
+/>
+
+{/* --- PNG Export (per-person) --- */}
+<div style={{ marginTop: 12 }}>
+  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    <div style={{ fontWeight: 600 }}>Export person PNG:</div>
+
+    <select
+      value={exportName}
+      onChange={(e) => setExportName(e.target.value)}
+      style={{ padding: 8 }}
+      disabled={!rotaRows || rotaRows.length === 0}
+    >
+      <option value="">Select person…</option>
+      {(selectedNames || []).map((n) => (
+        <option key={n} value={n}>
+          {n}
+        </option>
+      ))}
+    </select>
+
+    <button
+      type="button"
+      disabled={!exportName}
+      onClick={() => exportElementToPng("rota-person-export", `${exportName}-rota.png`)}
+      style={{ padding: "8px 10px" }}
+    >
+      Download PNG
+    </button>
+  </div>
+
+  {/* hidden export target */}
+  <div style={{ position: "absolute", left: -9999, top: 0 }}>
+    <div id="rota-person-export">
+      <h2 style={{ margin: "0 0 8px 0" }}>{exportName} – On-Call Rota</h2>
+
+      <table className="rota-table">
+        <thead>
+          <tr>
+            <th style={{ width: "30%" }}>Week commencing (Friday)</th>
+            <th>Duty</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rotaRows
+            .filter((r) => r.weekend === exportName || r.week === exportName)
+            .map((r, i) => (
+              <tr key={i}>
+                <td>{formatUK(r.weekCommencing)}</td>
+                <td>
+                  {r.weekend === exportName ? "Weekend" : ""}
+                  {r.weekend === exportName && r.week === exportName ? " + " : ""}
+                  {r.week === exportName ? "Week" : ""}
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+        
+      
+
       </div>
     </div>
   );
