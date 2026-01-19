@@ -34,7 +34,7 @@ export default function PeoplePicker({
 return (
   <div style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8 }}>
     <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
-      <strong style={{ color: "black" }}>People</strong>
+      <strong style={{ color: "black", backgroundColor: "#a58d8d",padding:8 }}>People</strong>
 
       <button
         type="button"
@@ -52,7 +52,7 @@ return (
         Clear
       </button>
 
-      <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.8, color: "black" }}>
+      <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.8, color: "black",backgroundColor:"#a58d8d",padding:"4px 8px",borderRadius:4 }}>
         Selected: <b>{selectedNames?.length ?? 0}</b>
       </span>
     </div>
@@ -126,7 +126,7 @@ return (
         {addError}
       </div>
     ) : (
-      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8, color: "black" }}>
+      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8, color: "black",backgroundColor:"#f0f0f0",padding:6,borderRadius:4 }}>
         ✔️ = appears in the currently loaded rota (derived automatically)
       </div>
     )}
