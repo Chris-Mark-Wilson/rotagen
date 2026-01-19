@@ -154,10 +154,10 @@ export default function RotaStore({ names, weeks, startDateISO, rotaRows, onLoad
               <button onClick={logout} style={{ padding: "10px 12px" }}>Sign out</button>
             </>
           )}
-          <button onClick={saveToFirestore} disabled={!user} style={{ padding: "10px 12px" }}>
+          <button onClick={saveToFirestore} disabled={/*!user*/ false} style={{ padding: "10px 12px" }}>
             Save to cloud (next rev)
           </button>
-          <button onClick={refreshList} disabled={!user} style={{ padding: "10px 12px" }}>
+          <button onClick={refreshList} disabled={/*!user*/ false} style={{ padding: "10px 12px" }}>
             Refresh list
           </button>
         </div>
