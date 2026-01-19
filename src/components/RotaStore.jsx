@@ -75,10 +75,10 @@ export default function RotaStore({ names, weeks, startDateISO, rotaRows, onLoad
 
   async function saveToFirestore() {
     setStatus("");
-    if (!user) {
-      setStatus("Please sign in first.");
-      return;
-    }
+    // if (!user) {
+    //   setStatus("Please sign in first.");
+    //   return;
+    // }
     if (!rotaRows || rotaRows.length === 0) {
       setStatus("Generate a rota first.");
       return;
