@@ -36,10 +36,11 @@ function formatUK(date) {
 function generateRotaLinearBalanced({ names, startFriday, weeks }) {
   const cleanNames = (names || []).map((n) => String(n).trim()).filter(Boolean);
 
-  if (cleanNames.length < 3) {
+  if (cleanNames.length < 4) {
     return {
       rows: [],
-      error: "You need at least 3 names for the weekend-cooldown rule to work.",
+      error:
+        "You need at least 4 names for the 'no back-to-back weeks' rule (2 duties per week).",
     };
   }
   if (!weeks || weeks < 1) {
@@ -48,11 +49,12 @@ function generateRotaLinearBalanced({ names, startFriday, weeks }) {
 
   const weekendCount = new Map(cleanNames.map((n) => [n, 0]));
   const weekCount = new Map(cleanNames.map((n) => [n, 0]));
+  const lastAssignedWeek = new Map(cleanNames.map((n) => [n, -999])); // for spacing preference
 
   let pWeekend = 0;
   let pWeek = 0;
 
-  function pickCandidate(type, excludeSet) {
+  function pickCandidate(type, excludeSet, weekIndex) {
     const pointer = type === "weekend" ? pWeekend : pWeek;
 
     let bestName = null;
@@ -68,17 +70,37 @@ function generateRotaLinearBalanced({ names, startFriday, weeks }) {
       const wDay = weekCount.get(name) || 0;
 
       const dutyCount = type === "weekend" ? wEnd : wDay;
-      const balance = type === "weekend" ? wEnd - wDay : wDay - wEnd;
+      const totalCount = wEnd + wDay;
 
-      const score = [dutyCount, balance, k]; // lower is better
+      // Prefer more spacing: bigger gap is better
+      const last = lastAssignedWeek.get(name) ?? -999;
+      const gap = weekIndex - last; // bigger is better
+
+      // Prefer balancing weekend vs week per person
+      const balance = Math.abs(wEnd - wDay); // smaller better
+
+      // Score: lower is better
+      // - dutyCount: keep weekend/week fairly distributed
+      // - totalCount: keep overall load even
+      // - balance: avoid "all weekends vs all weeks"
+      // - -gap: prefer those not recently assigned (spacing)
+      // - k: stable-ish pointer feel
+      const score = [dutyCount, totalCount, balance, -gap, k];
 
       const better =
         !bestScore ||
         score[0] < bestScore[0] ||
         (score[0] === bestScore[0] && score[1] < bestScore[1]) ||
+        (score[0] === bestScore[0] && score[1] === bestScore[1] && score[2] < bestScore[2]) ||
         (score[0] === bestScore[0] &&
           score[1] === bestScore[1] &&
-          score[2] < bestScore[2]);
+          score[2] === bestScore[2] &&
+          score[3] < bestScore[3]) ||
+        (score[0] === bestScore[0] &&
+          score[1] === bestScore[1] &&
+          score[2] === bestScore[2] &&
+          score[3] === bestScore[3] &&
+          score[4] < bestScore[4]);
 
       if (better) {
         bestName = name;
@@ -96,32 +118,36 @@ function generateRotaLinearBalanced({ names, startFriday, weeks }) {
   }
 
   const rows = [];
-  let prevWeekend = null;
+  let prevAssigned = new Set(); // HARD RULE: nobody from last week can be used this week
 
   for (let w = 0; w < weeks; w++) {
-    const exclude = new Set();
-    if (prevWeekend) exclude.add(prevWeekend);
+    const exclude = new Set(prevAssigned);
 
-    const weekend = pickCandidate("weekend", exclude);
+    const weekend = pickCandidate("weekend", exclude, w);
     if (!weekend) {
       return {
         rows: [],
-        error: "Could not allocate Weekend duty with current names/rules.",
+        error:
+          "Could not allocate Weekend duty with current names/rules (try more people or fewer weeks).",
       };
     }
 
-    exclude.add(weekend);
+    exclude.add(weekend); // no duplicates same week
 
-    const weekDuty = pickCandidate("week", exclude);
+    const weekDuty = pickCandidate("week", exclude, w);
     if (!weekDuty) {
       return {
         rows: [],
-        error: "Could not allocate Week duty with current names/rules.",
+        error:
+          "Could not allocate Week duty with current names/rules (try more people or fewer weeks).",
       };
     }
 
     weekendCount.set(weekend, (weekendCount.get(weekend) || 0) + 1);
     weekCount.set(weekDuty, (weekCount.get(weekDuty) || 0) + 1);
+
+    lastAssignedWeek.set(weekend, w);
+    lastAssignedWeek.set(weekDuty, w);
 
     rows.push({
       weekCommencing: addDays(startFriday, w * 7),
@@ -129,11 +155,14 @@ function generateRotaLinearBalanced({ names, startFriday, weeks }) {
       week: weekDuty,
     });
 
-    prevWeekend = weekend;
+    // HARD RULE state for next iteration:
+    prevAssigned = new Set([weekend, weekDuty]);
   }
 
   return { rows, error: null };
 }
+
+
 
 function swapAssignments(rows, a, b) {
   const copy = rows.map((r) => ({ ...r }));
