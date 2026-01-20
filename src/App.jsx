@@ -895,32 +895,57 @@ export default function App() {
 
   {/* hidden export target */}
   <div style={{ position: "absolute", left: -9999, top: 0 }}>
-    <div id="rota-person-export">
-      <h2 style={{ margin: "0 0 8px 0" }}>{exportName} – On-Call Rota</h2>
+  <div id="rota-person-export">
+  <h2 style={{ margin: "0 0 8px 0" }}>{exportName} – On-Call Rota</h2>
 
-      <table className="rota-table">
-        <thead>
-          <tr>
-            <th style={{ width: "30%" }}>Week commencing (Friday)</th>
-            <th>Duty</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rotaRows
-            .filter((r) => r.weekend === exportName || r.week === exportName)
-            .map((r, i) => (
-              <tr key={i}>
-                <td>{formatUK(r.weekCommencing)}</td>
-                <td>
-                  {r.weekend === exportName ? "Weekend" : ""}
-                  {r.weekend === exportName && r.week === exportName ? " + " : ""}
-                  {r.week === exportName ? "Week" : ""}
-                </td>
-              </tr>
-            ))}
-        </tbody>
-      </table>
-    </div>
+  <table className="rota-table">
+    <thead>
+      <tr>
+        <th style={{ width: "30%" }}>Week commencing (Friday)</th>
+        <th>Duty</th>
+        <th>Buddy</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {rotaRows
+        .filter((r) => r.weekend === exportName || r.week === exportName)
+        .map((r, i) => {
+          const isWeekend = r.weekend === exportName;
+          const isWeek = r.week === exportName;
+
+          // Buddy = the other slot that week
+          const buddy =
+            isWeekend && !isWeek
+              ? r.week
+              : isWeek && !isWeekend
+                ? r.weekend
+                : // edge-case: name appears in both slots (shouldn’t happen, but covers/swaps might)
+                  isWeekend && isWeek
+                  ? "(both)"
+                  : "";
+
+          const duty =
+            isWeekend && !isWeek
+              ? "Weekend"
+              : isWeek && !isWeekend
+                ? "Week"
+                : isWeekend && isWeek
+                  ? "Weekend + Week"
+                  : "";
+
+          return (
+            <tr key={i}>
+              <td>{formatUK(r.weekCommencing)}</td>
+              <td>{duty}</td>
+              <td>{buddy}</td>
+            </tr>
+          );
+        })}
+    </tbody>
+  </table>
+</div>
+
   </div>
 </div>
 
