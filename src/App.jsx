@@ -244,6 +244,10 @@ export default function App() {
 
   const [user, setUser] = useState(null);
 
+  
+const [exportModalOpen, setExportModalOpen] = useState(false);
+
+
   const isAdmin = !!user; // for now: signed-in = admin
 
   const currentWeekIndex = useMemo(
@@ -963,91 +967,142 @@ export default function App() {
           selectedPeople={twoPicked}
           onPersonClick={toggleTwoPick}
         />
+        {/* --- Person rota preview + PNG export --- */}
+<div style={{ marginTop: 12 }}>
+  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    <div style={{ fontWeight: 600 }}>Person rota:</div>
 
-        {/* --- PNG Export (per-person) --- */}
-        <div style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 600 }}>Export person PNG:</div>
+    <select
+      value={exportName}
+      onChange={(e) => setExportName(e.target.value)}
+      style={{ padding: 8 }}
+      disabled={!rotaRows || rotaRows.length === 0}
+    >
+      <option value="">Select person…</option>
+      {(selectedNames || []).map((n) => (
+        <option key={n} value={n}>{n}</option>
+      ))}
+    </select>
 
-            <select
-              value={exportName}
-              onChange={(e) => setExportName(e.target.value)}
-              style={{ padding: 8 }}
-              disabled={!rotaRows || rotaRows.length === 0}
-            >
-              <option value="">Select person…</option>
-              {(selectedNames || []).map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+    <button
+      type="button"
+      disabled={!exportName}
+      onClick={() => setExportModalOpen(true)}
+      style={{ padding: "8px 10px" }}
+    >
+      View
+    </button>
+  </div>
+</div>
 
-            <button
-              type="button"
-              disabled={!exportName}
-              onClick={() => exportElementToPng("rota-person-export", `${exportName}-rota.png`)}
-              style={{ padding: "8px 10px" }}
-            >
-              Download PNG
-            </button>
+{exportModalOpen ? (
+  <div
+    onClick={() => setExportModalOpen(false)}
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.5)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16,
+      zIndex: 9999,
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: "min(900px, 96vw)",
+        maxHeight: "90vh",
+        overflow: "auto",
+        background: "#fff",
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        padding: 16,
+        color: "black",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>
+            {exportName} – On-Call Rota
           </div>
-
-          {/* hidden export target */}
-          <div style={{ position: "absolute", left: -9999, top: 0 }}>
-            <div id="rota-person-export">
-              <h2 style={{ margin: "0 0 8px 0" }}>{exportName} – On-Call Rota</h2>
-
-              <table className="rota-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: "30%" }}>Week commencing (Friday)</th>
-                    <th>Duty</th>
-                    <th>Buddy</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {rotaRows
-                    .filter((r) => r.weekend === exportName || r.week === exportName)
-                    .map((r, i) => {
-                      const isWeekend = r.weekend === exportName;
-                      const isWeek = r.week === exportName;
-
-                      // Buddy = the other slot that week
-                      const buddy =
-                        isWeekend && !isWeek
-                          ? r.week
-                          : isWeek && !isWeekend
-                            ? r.weekend
-                            : // edge-case: name appears in both slots (shouldn’t happen, but covers/swaps might)
-                            isWeekend && isWeek
-                              ? "(both)"
-                              : "";
-
-                      const duty =
-                        isWeekend && !isWeek
-                          ? "Weekend"
-                          : isWeek && !isWeekend
-                            ? "Week"
-                            : isWeekend && isWeek
-                              ? "Weekend + Week"
-                              : "";
-
-                      return (
-                        <tr key={i}>
-                          <td>{formatUK(r.weekCommencing)}</td>
-                          <td>{duty}</td>
-                          <td>{buddy}</td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            Preview (download PNG below)
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setExportModalOpen(false)}
+          style={{ padding: "8px 10px" }}
+        >
+          Close
+        </button>
+      </div>
+
+      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          disabled={!exportName}
+          onClick={() => exportElementToPng("rota-person-export", `${exportName}-rota.png`)}
+          style={{ padding: "8px 10px" }}
+        >
+          Download PNG
+        </button>
+      </div>
+
+      {/* This is BOTH the preview + the PNG export target */}
+      <div id="rota-person-export" style={{ marginTop: 12 }}>
+        <table className="rota-table">
+          <thead>
+            <tr>
+              <th style={{ width: "30%" }}>Week commencing (Friday)</th>
+              <th>Duty</th>
+              <th>Buddy</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {rotaRows
+              .filter((r) => r.weekend === exportName || r.week === exportName)
+              .map((r, i) => {
+                const isWeekend = r.weekend === exportName;
+                const isWeek = r.week === exportName;
+
+                const buddy =
+                  isWeekend && !isWeek
+                    ? r.week
+                    : isWeek && !isWeekend
+                      ? r.weekend
+                      : isWeekend && isWeek
+                        ? "(both)"
+                        : "";
+
+                const duty =
+                  isWeekend && !isWeek
+                    ? "Weekend"
+                    : isWeek && !isWeekend
+                      ? "Week"
+                      : isWeekend && isWeek
+                        ? "Weekend + Week"
+                        : "";
+
+                return (
+                  <tr key={i}>
+                    <td>{formatUK(r.weekCommencing)}</td>
+                    <td>{duty}</td>
+                    <td>{buddy}</td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+) : null}
+
 
 
 
