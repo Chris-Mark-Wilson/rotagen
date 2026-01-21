@@ -10,6 +10,8 @@ import {
   query,
   orderBy,
   serverTimestamp,
+  limit,
+  getDocs
 } from "firebase/firestore";
 
 const col = collection(db, "people");
@@ -61,3 +63,23 @@ export async function deletePerson(personId) {
   const ref = doc(db, "people", personId);
   return deleteDoc(ref);
 }
+
+export async function loadLatestRevision({ onLoadPayload, setRevision }) {
+  const q = query(
+    collection(db, "rota_revisions"),
+    orderBy("createdAt", "desc"),
+    limit(1),
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+
+  const latest = snap.docs[0].data();
+
+  // ✅ handle both shapes: doc IS payload, or doc has payload field
+  const payload = latest?.payload ?? latest;
+
+  onLoadPayload?.(payload);
+  if (typeof payload?.revision === "number") setRevision?.(payload.revision);
+}
+

@@ -43,7 +43,7 @@ export default function PeoplePicker({
           type="button"
           onClick={onEditPeople}
           disabled={!user}
-          title={user ? "" : "Sign in to edit people"}
+          title={user ? "Edit name, phone number, add or remove people" : "Sign in to edit people"}
           style={{
             padding: "6px 10px",
             cursor: user ? "pointer" : "not-allowed",

@@ -37,6 +37,22 @@ function formatUK(date) {
   const yyyy = d.getFullYear();
   return `${dd}/${mm}/${yyyy}`;
 }
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function findCurrentWeekIndex(rows) {
+  const today = startOfDay(new Date());
+  for (let i = 0; i < (rows || []).length; i++) {
+    const wc = startOfDay(rows[i].weekCommencing);
+    const end = addDays(wc, 7);
+    if (today >= wc && today < end) return i;
+  }
+  return -1;
+}
+
 
 function generateRotaLinearBalanced({ names, startFriday, weeks }) {
   const cleanNames = (names || []).map((n) => String(n).trim()).filter(Boolean);
@@ -228,10 +244,24 @@ export default function App() {
 
   const [user, setUser] = useState(null);
 
-useEffect(() => {
-  const unsub = onAuthStateChanged(auth, (u) => setUser(u));
-  return () => unsub();
-}, []);
+  const isAdmin = !!user; // for now: signed-in = admin
+
+  const currentWeekIndex = useMemo(
+    () => findCurrentWeekIndex(rotaRows),
+    [rotaRows],
+  );
+
+  const phoneByName = useMemo(() => {
+    const m = new Map();
+    for (const p of people || []) m.set(p.name, p.phone || "");
+    return m;
+  }, [people]);
+
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsub();
+  }, []);
 
 
 
@@ -555,6 +585,9 @@ useEffect(() => {
     >
       <h2 style={{ marginTop: 0 }}>Rota Generator</h2>
 
+     
+
+
       <div
         style={{
           display: "flex",
@@ -623,7 +656,7 @@ useEffect(() => {
               activeNameSet={activeNameSet}
               onEditPeople={() => setPeopleModalOpen(true)}
               user={user}
-              
+
             />
 
             <PeopleManagerModal
@@ -812,6 +845,45 @@ useEffect(() => {
           setUser={setUser}
         />
 
+ {currentWeekIndex >= 0 && rotaRows[currentWeekIndex] ? (
+  <div
+    style={{
+      marginTop: 12,
+      padding: 12,
+      border: "1px solid #ddd",
+      borderRadius: 8,
+      background: "#fffbe6",
+      color: "black",
+    }}
+  >
+    <div style={{ fontWeight: 800, marginBottom: 6 }}>
+      This week ({formatUK(rotaRows[currentWeekIndex].weekCommencing)})
+    </div>
+
+    <div style={{ display: "grid", gap: 6 }}>
+      <div>
+        <b>Weekend:</b> {rotaRows[currentWeekIndex].weekend}
+        {user && phoneByName.get(rotaRows[currentWeekIndex].weekend)
+          ? ` — ${phoneByName.get(rotaRows[currentWeekIndex].weekend)}`
+          : ""}
+      </div>
+
+      <div>
+        <b>Week:</b> {rotaRows[currentWeekIndex].week}
+        {user && phoneByName.get(rotaRows[currentWeekIndex].week)
+          ? ` — ${phoneByName.get(rotaRows[currentWeekIndex].week)}`
+          : ""}
+      </div>
+    </div>
+
+    {!isAdmin ? (
+      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+        Sign in to show phone numbers.
+      </div>
+    ) : null}
+  </div>
+) : null}
+
         <div style={{ marginTop: 10 }}>
           <RotaTable
             rows={rotaRows}
@@ -885,100 +957,100 @@ useEffect(() => {
         </div>
 
         {/* ShiftCounter ONLY used for global two-person picking (swap + cover-all) */}
-<ShiftCounter
-  rows={rotaRows}
-  pickMode={twoPickMode != null}
-  selectedPeople={twoPicked}
-  onPersonClick={toggleTwoPick}
-/>
+        <ShiftCounter
+          rows={rotaRows}
+          pickMode={twoPickMode != null}
+          selectedPeople={twoPicked}
+          onPersonClick={toggleTwoPick}
+        />
 
-{/* --- PNG Export (per-person) --- */}
-<div style={{ marginTop: 12 }}>
-  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-    <div style={{ fontWeight: 600 }}>Export person PNG:</div>
+        {/* --- PNG Export (per-person) --- */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 600 }}>Export person PNG:</div>
 
-    <select
-      value={exportName}
-      onChange={(e) => setExportName(e.target.value)}
-      style={{ padding: 8 }}
-      disabled={!rotaRows || rotaRows.length === 0}
-    >
-      <option value="">Select person…</option>
-      {(selectedNames || []).map((n) => (
-        <option key={n} value={n}>
-          {n}
-        </option>
-      ))}
-    </select>
+            <select
+              value={exportName}
+              onChange={(e) => setExportName(e.target.value)}
+              style={{ padding: 8 }}
+              disabled={!rotaRows || rotaRows.length === 0}
+            >
+              <option value="">Select person…</option>
+              {(selectedNames || []).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
 
-    <button
-      type="button"
-      disabled={!exportName}
-      onClick={() => exportElementToPng("rota-person-export", `${exportName}-rota.png`)}
-      style={{ padding: "8px 10px" }}
-    >
-      Download PNG
-    </button>
-  </div>
+            <button
+              type="button"
+              disabled={!exportName}
+              onClick={() => exportElementToPng("rota-person-export", `${exportName}-rota.png`)}
+              style={{ padding: "8px 10px" }}
+            >
+              Download PNG
+            </button>
+          </div>
 
-  {/* hidden export target */}
-  <div style={{ position: "absolute", left: -9999, top: 0 }}>
-  <div id="rota-person-export">
-  <h2 style={{ margin: "0 0 8px 0" }}>{exportName} – On-Call Rota</h2>
+          {/* hidden export target */}
+          <div style={{ position: "absolute", left: -9999, top: 0 }}>
+            <div id="rota-person-export">
+              <h2 style={{ margin: "0 0 8px 0" }}>{exportName} – On-Call Rota</h2>
 
-  <table className="rota-table">
-    <thead>
-      <tr>
-        <th style={{ width: "30%" }}>Week commencing (Friday)</th>
-        <th>Duty</th>
-        <th>Buddy</th>
-      </tr>
-    </thead>
+              <table className="rota-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: "30%" }}>Week commencing (Friday)</th>
+                    <th>Duty</th>
+                    <th>Buddy</th>
+                  </tr>
+                </thead>
 
-    <tbody>
-      {rotaRows
-        .filter((r) => r.weekend === exportName || r.week === exportName)
-        .map((r, i) => {
-          const isWeekend = r.weekend === exportName;
-          const isWeek = r.week === exportName;
+                <tbody>
+                  {rotaRows
+                    .filter((r) => r.weekend === exportName || r.week === exportName)
+                    .map((r, i) => {
+                      const isWeekend = r.weekend === exportName;
+                      const isWeek = r.week === exportName;
 
-          // Buddy = the other slot that week
-          const buddy =
-            isWeekend && !isWeek
-              ? r.week
-              : isWeek && !isWeekend
-                ? r.weekend
-                : // edge-case: name appears in both slots (shouldn’t happen, but covers/swaps might)
-                  isWeekend && isWeek
-                  ? "(both)"
-                  : "";
+                      // Buddy = the other slot that week
+                      const buddy =
+                        isWeekend && !isWeek
+                          ? r.week
+                          : isWeek && !isWeekend
+                            ? r.weekend
+                            : // edge-case: name appears in both slots (shouldn’t happen, but covers/swaps might)
+                            isWeekend && isWeek
+                              ? "(both)"
+                              : "";
 
-          const duty =
-            isWeekend && !isWeek
-              ? "Weekend"
-              : isWeek && !isWeekend
-                ? "Week"
-                : isWeekend && isWeek
-                  ? "Weekend + Week"
-                  : "";
+                      const duty =
+                        isWeekend && !isWeek
+                          ? "Weekend"
+                          : isWeek && !isWeekend
+                            ? "Week"
+                            : isWeekend && isWeek
+                              ? "Weekend + Week"
+                              : "";
 
-          return (
-            <tr key={i}>
-              <td>{formatUK(r.weekCommencing)}</td>
-              <td>{duty}</td>
-              <td>{buddy}</td>
-            </tr>
-          );
-        })}
-    </tbody>
-  </table>
-</div>
+                      return (
+                        <tr key={i}>
+                          <td>{formatUK(r.weekCommencing)}</td>
+                          <td>{duty}</td>
+                          <td>{buddy}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
 
-  </div>
-</div>
+          </div>
+        </div>
 
-        
-      
+
+
 
       </div>
     </div>

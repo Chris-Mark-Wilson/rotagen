@@ -12,6 +12,8 @@ import {
   where,
 } from "firebase/firestore";
 
+import { loadLatestRevision } from "../services/peopleService";
+
 function fmtLocal(iso) {
   try {
     return new Date(iso).toLocaleString();
@@ -28,10 +30,16 @@ export default function RotaStore({user,setUser, names, weeks, startDateISO, rot
   // A simple "group key" so different settings can have their own revision stream
   const rotaKey = useMemo(() => `${startDateISO}_${Number(weeks) || 0}`, [startDateISO, weeks]);
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
-    return () => unsub();
-  }, []);
+
+
+useEffect(() => {
+  // if (!user) return; // wait until signed in (for now)
+  loadLatestRevision({ onLoadPayload, setRevision }).catch((e) =>
+    console.error("Auto-load latest failed:", e),
+  );
+}, [user]);
+
+
 
   async function login() {
     setStatus("");
