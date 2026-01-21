@@ -9,6 +9,11 @@ import RotaStore from "./components/RotaStore";
 import { subscribePeople } from "./services/peopleService";
 import PeoplePicker from "./components/PeoplePicker";
 import { exportElementToPng } from "./utils/exportPng";
+import PeopleManagerModal from "./components/PeopleManagerModal";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "./firebase"; // adjust path if needed
+
+
 
 import "./App.css";
 
@@ -188,6 +193,9 @@ export default function App() {
   const [people, setPeople] = useState([]);
   const [selectedNames, setSelectedNames] = useState([]);
 
+  const [peopleModalOpen, setPeopleModalOpen] = useState(false);
+
+
   // Settings
   const [weeks, setWeeks] = useState(52);
   const [startDateISO, setStartDateISO] = useState("2026-01-02");
@@ -217,6 +225,14 @@ export default function App() {
   const [coverShiftError, setCoverShiftError] = useState("");
 
   const [exportName, setExportName] = useState("");
+
+  const [user, setUser] = useState(null);
+
+useEffect(() => {
+  const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+  return () => unsub();
+}, []);
+
 
 
   const startFriday = useMemo(() => {
@@ -605,6 +621,16 @@ export default function App() {
               selectedNames={selectedNames}
               setSelectedNames={setSelectedNames}
               activeNameSet={activeNameSet}
+              onEditPeople={() => setPeopleModalOpen(true)}
+              user={user}
+              
+            />
+
+            <PeopleManagerModal
+              open={peopleModalOpen}
+              onClose={() => setPeopleModalOpen(false)}
+              people={people}
+              user={user}
             />
 
             {error ? <div className="alert">{error}</div> : null}
@@ -782,6 +808,8 @@ export default function App() {
           revision={revision}
           setRevision={setRevision}
           onLoadPayload={applyLoadedPayload}
+          user={user}
+          setUser={setUser}
         />
 
         <div style={{ marginTop: 10 }}>

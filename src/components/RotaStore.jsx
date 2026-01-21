@@ -20,8 +20,8 @@ function fmtLocal(iso) {
   }
 }
 
-export default function RotaStore({ names, weeks, startDateISO, rotaRows, onLoadPayload, revision, setRevision }) {
-  const [user, setUser] = useState(null);
+export default function RotaStore({user,setUser, names, weeks, startDateISO, rotaRows, onLoadPayload, revision, setRevision }) {
+
   const [status, setStatus] = useState("");
   const [items, setItems] = useState([]);
 
