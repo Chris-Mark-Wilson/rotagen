@@ -50,7 +50,7 @@ export default function PeoplePicker({
             opacity: user ? 1 : 0.5,
           }}
         >
-          Edit people
+          Manage people
         </button>
 
      
