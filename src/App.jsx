@@ -212,6 +212,8 @@ export default function App() {
   const [peopleModalOpen, setPeopleModalOpen] = useState(false);
 
 
+
+
   // Settings
   const [weeks, setWeeks] = useState(52);
   const [startDateISO, setStartDateISO] = useState("2026-01-02");

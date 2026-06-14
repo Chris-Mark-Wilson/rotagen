@@ -1,10 +1,12 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { addPerson, updatePerson, deletePerson } from "../services/peopleService";
+import {HolidayModal} from "./HolidayModal";
 
 export default function PeopleManagerModal({ open, onClose, people }) {
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [err, setErr] = useState("");
+ 
 
   useEffect(() => {
     if (!open) {
@@ -57,6 +59,9 @@ export default function PeopleManagerModal({ open, onClose, people }) {
       setErr(e?.message || String(e));
     }
   }
+
+
+
 
   return (
     <div
@@ -154,7 +159,9 @@ export default function PeopleManagerModal({ open, onClose, people }) {
           </div>
         </div>
       </div>
+     
     </div>
+
   );
 }
 
@@ -162,6 +169,7 @@ function PersonRow({ person, onSave, onDelete }) {
   const [name, setName] = useState(person.name || "");
   const [phone, setPhone] = useState(person.phone || "");
   const [active, setActive] = useState(person.active !== false); // default true
+   const [holidayModalOpen,setHolidayModalOpen]=useState(false)
 
   // keep row inputs in sync if firestore updates
   useEffect(() => {
@@ -170,6 +178,7 @@ function PersonRow({ person, onSave, onDelete }) {
     setActive(person.active !== false);
   }, [person.id, person.name, person.phone, person.active]);
 
+  //has data changed from original person? if so, enable save button
   const dirty =
     name.trim() !== String(person.name || "").trim() ||
     phone.trim() !== String(person.phone || "").trim() ||
@@ -182,7 +191,7 @@ function PersonRow({ person, onSave, onDelete }) {
         borderRadius: 10,
         padding: 10,
         display: "grid",
-        gridTemplateColumns: "1fr 1fr auto auto auto",
+        gridTemplateColumns: "1fr 1fr auto auto auto auto",
         gap: 8,
         alignItems: "center",
       }}
@@ -208,6 +217,12 @@ function PersonRow({ person, onSave, onDelete }) {
       >
         Save
       </button>
+      <button
+        type="button"
+        onClick={() => setHolidayModalOpen(true)}
+      >
+     Holidays
+      </button>
 
       <button
         type="button"
@@ -216,6 +231,10 @@ function PersonRow({ person, onSave, onDelete }) {
       >
         Delete
       </button>
+
+        
+      <HolidayModal open={holidayModalOpen} onClose={()=>setHolidayModalOpen(false)} personId={person.id} 
+       />
     </div>
   );
 }
